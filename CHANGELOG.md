@@ -5,6 +5,20 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.2.0] - 2026-07-17
+
+### Alterado
+
+- **Semântica de posição/setpoint: agora −100..+100%, com 0 = repouso da mola**
+  (antes 0–100% com o repouso num % intermediário). +100 = abertura máxima
+  calibrada, −100 = mínima; normalização linear por partes em torno do repouso.
+- Duty do PWM de comando mapeia 0/50/100% → setpoint −100/0/+100.
+- Pedido de repouso (setpoint dentro da zona morta em torno de 0) → coast:
+  nenhuma corrente no motor, a mola posiciona — elimina atuação indesejada
+  quando o pedido é repouso.
+- Página web: barra de posição/setpoint com escala −100..+100 e marca do
+  repouso no centro.
+
 ## [0.1.0] - 2026-07-17
 
 ### Adicionado
