@@ -243,9 +243,15 @@ const char* stateName() {
 const Data& data() { return g_data; }
 
 float positionPct(uint16_t rawValue) {
-  if (!g_data.valid || g_data.maxRaw <= g_data.minRaw) return 0.0f;
-  return 100.0f * (float)((int32_t)rawValue - (int32_t)g_data.minRaw) /
-         (float)(g_data.maxRaw - g_data.minRaw);
+  if (!g_data.valid) return 0.0f;
+  const int32_t raw = rawValue;
+  const int32_t rest = g_data.restRaw;
+  // Duas rampas em torno do repouso: acima → 0..+100 até maxRaw,
+  // abaixo → 0..−100 até minRaw.
+  const int32_t span = raw >= rest ? (int32_t)g_data.maxRaw - rest
+                                   : rest - (int32_t)g_data.minRaw;
+  if (span <= 0) return 0.0f;
+  return 100.0f * (float)(raw - rest) / (float)span;
 }
 
 uint16_t learnedMaxRaw() { return s_learnedMax; }

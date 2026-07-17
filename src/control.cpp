@@ -115,9 +115,12 @@ void runCycle(uint32_t now, float dt) {
 
   updateTpsWatch(now);
 
-  // Telemetria base, válida em qualquer modo
+  // Telemetria base, válida em qualquer modo. Duty do comando (0..100%) →
+  // setpoint com sinal (−100..+100%, 50% de duty = repouso).
   s_positionPct = calibration::positionPct(tps::raw());
-  s_setpointPct = pwm_input::signalPresent() ? pwm_input::dutyPct() : 0.0f;
+  s_setpointPct = pwm_input::signalPresent()
+                      ? 2.0f * pwm_input::dutyPct() - 100.0f
+                      : 0.0f;
 
   // TPS implausível derruba qualquer modo — exceto Boot, Fault e Manual:
   // o modo manual de bancada opera em malha aberta e serve justamente para
@@ -156,6 +159,13 @@ void runCycle(uint32_t now, float dt) {
         // Failsafe: sem sinal de comando → motor solto, a mola leva a
         // borboleta ao repouso (não fechar ativamente até o mínimo).
         hbridge::disable();
+        s_pid.reset();
+        break;
+      }
+      if (fabsf(s_setpointPct) <= cfg.deadbandPct) {
+        // Pedido de repouso: zero absoluto = nenhuma corrente no motor.
+        // Quem posiciona é a mola, não o PID.
+        hbridge::drive(0.0f);
         s_pid.reset();
         break;
       }

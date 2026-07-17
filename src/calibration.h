@@ -35,7 +35,10 @@ State state();
 const char* stateName();
 const Data& data();
 
-// Normalização pela calibração: 0% = minRaw, 100% = maxRaw (sem clamp).
+// Normalização com sinal pela calibração: −100% = minRaw, 0% = restRaw
+// (repouso da mola), +100% = maxRaw. Linear por partes — rampas distintas
+// abaixo e acima do repouso (o repouso raramente é o centro geométrico).
+// Sem clamp.
 float positionPct(uint16_t rawValue);
 
 // Máximo do TPS aprendido fora de idle (usado no mapeamento da saída analógica).

@@ -1,8 +1,13 @@
 #pragma once
 #include <Arduino.h>
 
-// Malha principal: debounce do idle switch, setpoint (PWM de comando → % da
-// faixa calibrada), PID, failsafes, saída analógica mascarada e modos.
+// Malha principal: debounce do idle switch, setpoint (PWM de comando), PID,
+// failsafes, saída analógica mascarada e modos.
+//
+// Semântica de posição/setpoint: −100..+100%, com 0 = repouso da mola.
+// O duty do PWM de comando (0..100%) mapeia linearmente: 0% → −100 (fechar
+// todo), 50% → 0 (repouso), 100% → +100 (abrir todo). Pedido dentro da zona
+// morta em torno de 0 → coast (nenhuma corrente no motor; a mola posiciona).
 //
 // Modos:
 //   Boot         — espera sinais assentarem (~500 ms) e decide calibrar ou não
@@ -27,8 +32,8 @@ const char* modeName();
 const char* faultReason();  // "" quando sem falha
 
 // Telemetria para a web
-float setpointPct();
-float positionPct();      // normalizada pela calibração (pode sair de 0..100)
+float setpointPct();      // −100..+100 (0 = repouso)
+float positionPct();      // normalizada pela calibração (pode sair de ±100)
 float appliedDutyPct();
 float analogOutPct();     // valor mascarado enviado ao DAC
 bool idleActive();        // já com debounce

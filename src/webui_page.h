@@ -26,8 +26,9 @@ h2{font-size:14px;color:var(--acc);margin:0 0 8px}
 .stat.wide{grid-column:span 2}
 .v.err{color:var(--err)}.v.warn{color:var(--warn)}
 .bar{position:relative;height:22px;background:var(--bg);border:1px solid var(--edge);border-radius:6px;overflow:hidden;margin-top:10px}
-#barPos{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#2b6cb0,#4da3ff);transition:width .12s linear}
-#barSp{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);left:0}
+#barPos{position:absolute;top:0;bottom:0;left:50%;width:0;background:linear-gradient(90deg,#2b6cb0,#4da3ff);transition:left .12s linear,width .12s linear}
+#barSp{position:absolute;top:0;bottom:0;width:2px;background:var(--warn);left:50%}
+.bar .zero{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--dim);opacity:.6}
 .leg{display:flex;gap:16px;font-size:12px;color:var(--dim);margin-top:4px}
 .leg .p{color:var(--acc)}.leg .s{color:var(--warn)}
 .warnbox{background:#3a2a10;border:1px solid #6b4d17;color:var(--warn);padding:8px 10px;border-radius:6px;font-size:13px;margin-bottom:10px}
@@ -72,8 +73,8 @@ button.danger{background:var(--err);color:#fff}
 <div class="stat"><div class="l">Versão</div><div class="v" id="sVer">–</div></div>
 <div class="stat"><div class="l">Uptime</div><div class="v" id="sUptime">–</div></div>
 </div>
-<div class="bar"><div id="barPos"></div><div id="barSp"></div></div>
-<div class="leg"><span class="p">■ posição</span><span class="s">▌ setpoint</span></div>
+<div class="bar"><div class="zero"></div><div id="barPos"></div><div id="barSp"></div></div>
+<div class="leg"><span>−100%</span><span class="p">■ posição</span><span class="s">▌ setpoint</span><span>0 = repouso (centro)</span><span style="margin-left:auto">+100%</span></div>
 </div>
 
 <div class="card">
@@ -189,9 +190,12 @@ function render(s){
   t('sCalV','rep '+s.cal.rest+' · mín '+s.cal.min+' · máx '+s.cal.max+' · apr '+s.cal.learnedMax);
   t('sVer','v'+s.ver);
   t('sUptime',up(s.uptimeMs));
-  var p=Math.max(0,Math.min(100,s.pos)),q=Math.max(0,Math.min(100,s.setpoint));
-  el('barPos').style.width=p+'%';
-  el('barSp').style.left='calc('+q+'% - 1px)';
+  // Escala −100..+100 com o repouso (0) no centro da barra
+  var p=Math.max(-100,Math.min(100,s.pos)),q=Math.max(-100,Math.min(100,s.setpoint));
+  var bp=el('barPos');
+  bp.style.left=(p<0?50+p/2:50)+'%';
+  bp.style.width=Math.abs(p)/2+'%';
+  el('barSp').style.left='calc('+(50+q/2)+'% - 1px)';
 }
 
 var busy=false;
