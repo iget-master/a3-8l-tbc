@@ -33,6 +33,14 @@ através de uma ponte H, que permite girar o motor nos dois sentidos.
 | Ponte H (IN1/IN2) | Saída PWM | Aciona o motor do atuador nos dois sentidos (abrir / fechar) |
 | Saída analógica | Saída (DAC) | Posição da borboleta 0–100%, **mascarada** pela lógica de idle (ver abaixo) |
 
+## Semântica de 0–100%
+
+A faixa do **atuador** vem da auto calibração: **0% = abertura mínima calibrada**
+(motor fechando no batente, abaixo do repouso) e **100% = abertura máxima
+calibrada** (motor abrindo em plena carga). A posição de **repouso da mola fica
+num percentual intermediário** dessa faixa. O setpoint (duty do PWM de comando)
+e a posição medida usam essa mesma escala.
+
 ## Lógica de controle
 
 ### Malha PID
@@ -40,32 +48,46 @@ através de uma ponte H, que permite girar o motor nos dois sentidos.
 - O sinal PWM de entrada é medido (duty cycle) e convertido no **setpoint** de
   abertura (0–100% da faixa calibrada do atuador).
 - A posição real vem do potenciômetro (TPS), normalizada pela calibração.
-- Um PID básico calcula um esforço de controle **com sinal**:
+- Um PID (derivada na medição, anti-windup por integração condicional) calcula
+  um esforço de controle **com sinal**:
   - Esforço positivo → PWM na ponte H no sentido **abrir**.
   - Esforço negativo → PWM na ponte H no sentido **fechar** (abaixo do repouso).
-  - Esforço zero / motor desligado → a mola leva a borboleta à posição de repouso.
-- Saturação do integrador (anti-windup), zona morta configurável e limite de
-  duty configurável pela página web.
+  - Motor desligado/coast → a mola leva a borboleta à posição de repouso.
+- Zona morta configurável (dentro dela o erro vale zero e o integrador segura o
+  último esforço) e limite de duty configurável pela página web.
 
 ### Regra do switch de idle
 
 **Se o motorista estiver acionando o acelerador (switch de idle aberto), o motor
-NÃO é acionado** — a ponte H fica desabilitada/livre e o PID é reinicializado
+NÃO é acionado** — a ponte H fica desabilitada e o PID é reinicializado
 (integrador zerado) para não acumular erro enquanto o pedal comanda a borboleta
 pelo cabo.
 
+**Única exceção:** o **modo manual de bancada**, acionado conscientemente pela
+página web, comanda o duty diretamente e ignora o idle switch e o TPS (opera em
+malha aberta, serve para testar o motor). Por segurança ele **expira sozinho em
+3 s** sem keepalive — a página reenvia o comando a cada 1 s enquanto o modo
+estiver ligado.
+
 ### Saída analógica de posição (mascarada)
 
-A saída analógica indica a posição da borboleta em 0–100%, com a seguinte
-máscara:
+A saída no DAC (0–3,3 V) indica a posição da borboleta em 0–100%, com máscara:
 
 | Condição | Saída |
 |---|---|
 | Em idle (switch de idle acionado / pedal solto) | **0%** |
-| Fora de idle (motorista acelerando) | Replica o valor lido do sensor de posição (0–100% da faixa calibrada) |
+| Fora de idle (motorista acelerando) | Posição do TPS normalizada pela **faixa da saída** (abaixo) |
 
-Isso faz com que a atuação da marcha lenta fique "invisível" para quem consome
-esse sinal, que só enxerga a abertura provocada pelo pedal.
+A **faixa da saída** é própria (não é a faixa do atuador): vai de `outMinRaw` a
+`outMaxRaw`. Com os defaults (`0` = automático), o mínimo é o da calibração e o
+máximo é o **máximo aprendido**: o firmware observa o maior valor plausível do
+TPS visto fora de idle (pedal fundo → WOT), persiste na NVS (com proteção
+contra desgaste da flash) e usa esse valor como fundo de escala. Assim a
+atuação da marcha lenta fica invisível para quem consome o sinal, e fora de
+idle a escala cobre o curso todo do pedal. Uma calibração bem-sucedida
+re-baseia o aprendido se ele estiver incoerente (abaixo do máximo calibrado ou
+fora da faixa plausível). Ambos os limites podem ser fixados manualmente pela
+página web.
 
 ## Auto calibração
 
@@ -73,71 +95,114 @@ Ao energizar o circuito, se o **switch de idle estiver acionado** (pedal solto),
 é executada uma rotina de auto calibração para encontrar os três pontos de
 referência do sensor de posição:
 
-1. **Repouso** — motor desligado; aguarda estabilizar e registra a leitura do TPS.
-2. **Abertura máxima** — motor acionado em 100% no sentido abrir; aguarda a
-   leitura estabilizar (fim de curso mecânico) e registra.
-3. **Abertura mínima** — motor acionado em 100% no sentido fechar; aguarda
-   estabilizar e registra.
-4. Motor desligado, borboleta volta ao repouso; valores são validados
-   (mín < repouso < máx, faixa mínima plausível) e salvos na NVS (flash).
+1. **Repouso** — motor solto; aguarda a leitura estabilizar e registra.
+2. **Abertura máxima** — motor acionado (duty `calDrivePct`, default 100%) no
+   sentido abrir; aguarda estabilizar no fim de curso e registra.
+3. **Abertura mínima** — idem no sentido fechar; registra.
+4. Motor solto (borboleta volta ao repouso); valores validados
+   (mín < repouso < máx, faixa mínima configurável) e salvos na NVS.
 
-Se o switch de idle **não** estiver acionado na energização (ou a validação
-falhar), a calibração é pulada e são usados os **últimos valores salvos** na NVS.
-A calibração também pode ser disparada manualmente pela página web (respeitando
-a condição de idle).
+A rotina **aborta** (mantendo a última calibração válida da NVS) se: o pedal
+for acionado no meio, alguma fase não estabilizar dentro do timeout, ou a
+validação falhar. Se o idle não estiver acionado na energização, a calibração é
+pulada e valem os últimos valores salvos. **Sem nenhuma calibração válida o
+firmware entra em `Fault`** (motor desligado) — a página web continua ativa
+para diagnosticar e disparar a calibração manualmente (respeitando o idle).
+
+## Modos de operação
+
+| Modo | Comportamento | LED (GPIO2) |
+|---|---|---|
+| `Boot` | Espera sinais assentarem (~500 ms) e decide calibrar ou não | apagado |
+| `Calibrating` | Auto calibração em andamento | pisca 5 Hz |
+| `Run` | Em idle: PID atuando no motor | pisca 1 Hz |
+| `DriverActive` | Pedal acionado: motor solto, PID zerado, aprende máx do TPS | 2 piscadas curtas/s |
+| `Fault` | TPS implausível ou sem calibração: ponte desabilitada | aceso fixo |
+| `Manual` | Bancada (via web): duty direto, expira sem keepalive | pisca 10 Hz |
 
 ## Segurança / failsafe
 
-- Leitura do TPS fora da faixa plausível (sensor desconectado/curto) → motor
-  desligado (mola leva ao repouso) e erro sinalizado na página web.
-- Perda do sinal PWM de comando (timeout sem bordas) → setpoint tratado como 0%
-  (repouso) — comportamento configurável.
-- Watchdog de software; qualquer travamento resulta em motor desligado
-  (ponte H desabilitada), estado seguro garantido pela mola de retorno.
+- TPS fora da faixa plausível por >100 ms → `Fault` (motor desligado, mola leva
+  ao repouso). Recupera sozinho após 500 ms de leitura plausível (se houver
+  calibração válida).
+- **Perda do sinal PWM de comando** (timeout sem bordas, default 250 ms) →
+  **motor solto (coast)**: a mola leva a borboleta ao repouso. Sinal preso em
+  nível alto pode, opcionalmente (`cmdStuckHighIs100`, default ligado), valer
+  100%.
+- **Watchdog de tarefa** no loop principal (task WDT, ~5 s): travamento do
+  firmware → reset, e o boot reinicializa com a ponte H desabilitada.
+- Modo manual expira em 3 s sem keepalive.
+- Parâmetros são saneados (faixas e relações entre campos) tanto na carga da
+  NVS quanto ao salvar pela web.
 
 ## Página web (WiFi AP)
 
-O ESP32 sobe um **Access Point WiFi** (ex.: SSID `A3-TBC`, IP `192.168.4.1`)
-servindo uma página para debug e parametrização:
+O ESP32 sobe um AP WiFi (default: SSID `A3-TBC`, senha `a3tbc123` — **troque**)
+com a página em `http://192.168.4.1/`:
 
-- **Monitor ao vivo**: setpoint, posição, duty aplicado, estado do idle switch,
-  erro do PID, valores brutos do ADC, estado da calibração.
-- **Parâmetros ajustáveis** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta,
-  limites de duty, frequência do PWM de saída, timeout do sinal de comando,
-  parâmetros da calibração.
-- **Ações**: disparar auto calibração, modo manual (comandar duty diretamente
-  para testes de bancada), salvar/restaurar padrões.
+- **Monitor ao vivo** (~3 Hz): modo, falha, idle, setpoint, posição, duty
+  aplicado, saída analógica, raw do TPS, duty/frequência do comando, termos
+  P/I/D, estado e valores da calibração, versão/uptime.
+- **Parâmetros** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta, limite de
+  duty, frequência da malha e do PWM da ponte, timeout/semântica do sinal de
+  comando, faixa de plausibilidade do TPS, parâmetros da calibração, mapeamento
+  da saída analógica, idle switch, SSID/senha do AP (valem após reiniciar).
+- **Ações**: disparar calibração, restaurar padrões, modo manual de bancada.
+
+API HTTP (form-encoded/JSON): `GET /api/status`, `GET|POST /api/params`,
+`POST /api/cal`, `POST /api/manual`, `POST /api/defaults`.
 
 ## Hardware
 
 Sugestão de pinout, ponte H e circuitos de condicionamento estão documentados em
 [`docs/hardware.md`](docs/hardware.md).
 
-## Estrutura planejada do repositório
+## Build e gravação
+
+Projeto [PlatformIO](https://platformio.org/) (framework Arduino, board
+`esp32dev`, apenas o core arduino-esp32 — sem bibliotecas externas):
+
+```bash
+pio run              # compila
+pio run -t upload    # grava
+pio device monitor   # serial 115200
+```
+
+## Estrutura do repositório
 
 ```
 ├── README.md            ← este documento
+├── CLAUDE.md            ← convenções do projeto (commits, versionamento, docs)
+├── CHANGELOG.md         ← histórico de versões (Keep a Changelog / SemVer)
 ├── docs/
 │   └── hardware.md      ← pinout, ligações e condicionamento de sinais
-├── platformio.ini       ← projeto PlatformIO (Arduino framework)
-└── src/                 ← firmware
-    ├── main.cpp
-    ├── pins.h           ← definição central do pinout
-    ├── pid.*            ← controlador PID
-    ├── calibration.*    ← rotina de auto calibração + NVS
-    ├── pwm_input.*      ← medição do duty do sinal de comando
-    ├── hbridge.*        ← driver da ponte H (LEDC)
-    └── webui.*          ← AP WiFi + página de debug/parametrização
+├── platformio.ini
+└── src/
+    ├── main.cpp         ← setup/loop, watchdog, LED de status
+    ├── version.h        ← FW_VERSION (fonte da verdade do SemVer)
+    ├── pins.h           ← pinout central (espelho de docs/hardware.md)
+    ├── settings.*       ← parâmetros ajustáveis persistidos na NVS
+    ├── tps.*            ← leitura filtrada do potenciômetro (mediana + EMA)
+    ├── pwm_input.*      ← medição do duty do comando (ISR)
+    ├── hbridge.*        ← ponte H via LEDC (duty com sinal)
+    ├── pid.*            ← PID com anti-windup e derivada na medição
+    ├── calibration.*    ← auto calibração + NVS + máx aprendido do TPS
+    ├── analog_out.*     ← saída DAC 0–100%
+    ├── control.*        ← máquina de modos, malha, failsafes, máscara
+    ├── webui.*          ← AP WiFi + rotas HTTP
+    └── webui_page.h     ← página (HTML/CSS/JS embutidos)
 ```
 
 ## Roadmap
 
 - [x] Documentação do projeto e do hardware (pinout)
-- [ ] Esqueleto do projeto PlatformIO
-- [ ] Leitura do TPS + medição do PWM de entrada + idle switch
-- [ ] Driver da ponte H (LEDC, dois sentidos)
-- [ ] Rotina de auto calibração + persistência NVS
-- [ ] Malha PID + regra do idle switch + failsafes
-- [ ] Saída analógica mascarada (DAC)
-- [ ] WiFi AP + página web de debug/parametrização
-- [ ] Testes em bancada e no veículo
+- [x] Esqueleto do projeto PlatformIO
+- [x] Leitura do TPS + medição do PWM de entrada + idle switch
+- [x] Driver da ponte H (LEDC, dois sentidos)
+- [x] Rotina de auto calibração + persistência NVS
+- [x] Malha PID + regra do idle switch + failsafes
+- [x] Saída analógica mascarada (DAC)
+- [x] WiFi AP + página web de debug/parametrização
+- [ ] Compilação verificada com toolchain xtensa (`pio run`) e ajuste de warnings
+- [ ] Testes em bancada (motor + potenciômetro reais, sintonia do PID)
+- [ ] Testes no veículo

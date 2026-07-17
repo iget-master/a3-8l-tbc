@@ -16,7 +16,8 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
   - Auto calibração no boot (repouso/máx/mín) condicionada ao idle switch,
     com persistência na NVS e fallback para a última calibração válida.
   - Malha de controle com modos Boot/Calibrando/Run/Motorista/Falha/Manual,
-    regra do idle switch e failsafes (TPS implausível, timeout de comando).
+    regra do idle switch e failsafes (TPS implausível, perda do sinal de
+    comando → coast, watchdog de tarefa no loop).
   - Saída analógica mascarada no DAC (0% em idle; TPS normalizado fora de idle),
     com aprendizado do máximo do TPS.
   - AP WiFi com página web de debug e parametrização (ganhos, limites,
