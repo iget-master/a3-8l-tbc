@@ -33,28 +33,46 @@ através de uma ponte H, que permite girar o motor nos dois sentidos.
 | Ponte H (IN1/IN2) | Saída PWM | Aciona o motor do atuador nos dois sentidos (abrir / fechar) |
 | Saída analógica | Saída (DAC) | Posição da borboleta 0–100%, **mascarada** pela lógica de idle (ver abaixo) |
 
-## Semântica de 0–100%
+## Semântica de posição: −100% a +100% (0 = repouso)
 
-A faixa do **atuador** vem da auto calibração: **0% = abertura mínima calibrada**
-(motor fechando no batente, abaixo do repouso) e **100% = abertura máxima
-calibrada** (motor abrindo em plena carga). A posição de **repouso da mola fica
-num percentual intermediário** dessa faixa. O setpoint (duty do PWM de comando)
-e a posição medida usam essa mesma escala.
+Posição e setpoint do atuador usam uma escala **com sinal**, ancorada nos três
+pontos da calibração:
+
+- **0% = repouso da mola** (motor sem corrente).
+- **+100% = abertura máxima calibrada** (motor abrindo em plena carga).
+- **−100% = abertura mínima calibrada** (motor fechando no batente).
+- A escala é linear por partes: rampas independentes acima e abaixo do repouso
+  (o repouso quase nunca é o centro geométrico do curso).
+
+O duty do PWM de comando (0–100%) mapeia linearmente nessa escala:
+**0% de duty → −100 (fechar todo), 50% → 0 (repouso), 100% → +100 (abrir
+todo)**.
+
+Pedir repouso é pedir **zero absoluto**: com o setpoint dentro da zona morta em
+torno de 0, a ponte fica em coast (**nenhuma corrente no motor**) e quem
+posiciona a borboleta é a mola — o PID não tenta "segurar" o repouso, então não
+há atuação indesejada por erro fracionário de calibração.
+
+> Limitação física do comando: duty 0% verdadeiro é nível estático (sem
+> bordas), indistinguível de fio desconectado — ambos caem no failsafe de sinal
+> ausente (coast/repouso). Para comandar −100% de fato, o sinal precisa manter
+> bordas (duty pequeno, ex.: 1%).
 
 ## Lógica de controle
 
 ### Malha PID
 
-- O sinal PWM de entrada é medido (duty cycle) e convertido no **setpoint** de
-  abertura (0–100% da faixa calibrada do atuador).
-- A posição real vem do potenciômetro (TPS), normalizada pela calibração.
-- Um PID (derivada na medição, anti-windup por integração condicional) calcula
-  um esforço de controle **com sinal**:
+- O sinal PWM de entrada é medido (duty cycle) e convertido no **setpoint**
+  −100..+100% (0 = repouso; ver semântica acima).
+- A posição real vem do potenciômetro (TPS), normalizada pela calibração na
+  mesma escala com sinal.
+- Setpoint dentro da zona morta em torno de 0 → **coast** (motor sem corrente,
+  mola posiciona). Fora dela, um PID (derivada na medição, anti-windup por
+  integração condicional) calcula o esforço **com sinal**:
   - Esforço positivo → PWM na ponte H no sentido **abrir**.
   - Esforço negativo → PWM na ponte H no sentido **fechar** (abaixo do repouso).
-  - Motor desligado/coast → a mola leva a borboleta à posição de repouso.
-- Zona morta configurável (dentro dela o erro vale zero e o integrador segura o
-  último esforço) e limite de duty configurável pela página web.
+- Zona morta também se aplica ao erro (dentro dela o erro vale zero e o
+  integrador segura o último esforço); limite de duty configurável pela web.
 
 ### Regra do switch de idle
 
@@ -128,7 +146,7 @@ para diagnosticar e disparar a calibração manualmente (respeitando o idle).
 - **Perda do sinal PWM de comando** (timeout sem bordas, default 250 ms) →
   **motor solto (coast)**: a mola leva a borboleta ao repouso. Sinal preso em
   nível alto pode, opcionalmente (`cmdStuckHighIs100`, default ligado), valer
-  100%.
+  duty 100% (= setpoint +100).
 - **Watchdog de tarefa** no loop principal (task WDT, ~5 s): travamento do
   firmware → reset, e o boot reinicializa com a ponte H desabilitada.
 - Modo manual expira em 3 s sem keepalive.

@@ -58,7 +58,7 @@ montado à mão).
 
 ## Decisões de projeto
 
-- Semântica 0–100% do atuador: 0% = abertura mínima calibrada, 100% = abertura máxima calibrada; o repouso fica num % intermediário.
+- Semântica de posição/setpoint do atuador: **−100..+100%, com 0 = repouso da mola** (+100 = abertura máxima calibrada, −100 = mínima; rampas independentes acima/abaixo do repouso). Duty do comando 0/50/100% → −100/0/+100. Pedido dentro da zona morta em torno de 0 → coast (nenhuma corrente no motor).
 - Saída analógica mascarada: 0% em idle; fora de idle replica o TPS normalizado por uma faixa própria (mín da calibração → máximo aprendido/WOT).
 - Sem calibração válida → modo `Fault` (motor desligado); web continua ativa para diagnosticar/calibrar.
 
