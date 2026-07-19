@@ -43,6 +43,8 @@ pontos da calibração:
 - **−100% = abertura mínima calibrada** (motor fechando no batente).
 - A escala é linear por partes: rampas independentes acima e abaixo do repouso
   (o repouso quase nunca é o centro geométrico do curso).
+- Leituras do TPS **além** do máx/mín calibrado **saturam em ±100%** (não
+  extrapolam a faixa) — vale para a telemetria e para a medição do PID.
 
 O duty do PWM de comando (0–100%) mapeia linearmente nessa escala:
 **0% de duty → −100 (fechar todo), 50% → 0 (repouso), 100% → +100 (abrir
@@ -153,22 +155,29 @@ para diagnosticar e disparar a calibração manualmente (respeitando o idle).
 - Parâmetros são saneados (faixas e relações entre campos) tanto na carga da
   NVS quanto ao salvar pela web.
 
-## Página web (WiFi AP)
+## Página web (WiFi)
 
-O ESP32 sobe um AP WiFi (default: SSID `A3-TBC`, senha `a3tbc123` — **troque**)
-com a página em `http://192.168.4.1/`:
+No boot, havendo uma **rede local (STA)** configurada (SSID/senha), o ESP32 tenta
+conectar nela e a página fica acessível pelo IP que o roteador atribuir (veja no
+log serial a 115200). Sem rede configurada — ou se ela não conectar em ~15 s — o
+ESP sobe seu **próprio AP** (default: SSID `A3-TBC`, senha `a3tbc123` —
+**troque**) com a página em `http://192.168.4.1/`:
 
 - **Monitor ao vivo** (~3 Hz): modo, falha, idle, setpoint, posição, duty
   aplicado, saída analógica, raw do TPS, duty/frequência do comando, termos
   P/I/D, estado e valores da calibração, versão/uptime.
 - **Parâmetros** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta, limite de
   duty, frequência da malha e do PWM da ponte, timeout/semântica do sinal de
-  comando, faixa de plausibilidade do TPS, parâmetros da calibração, mapeamento
-  da saída analógica, idle switch, SSID/senha do AP (valem após reiniciar).
-- **Ações**: disparar calibração, restaurar padrões, modo manual de bancada.
+  comando, faixa de plausibilidade e filtro (α da EMA e nº de amostras da mediana) do
+  TPS, parâmetros da calibração, mapeamento
+  da saída analógica, idle switch, SSID/senha do AP próprio e da rede local
+  (STA) (valem após reiniciar).
+- **Ações**: disparar calibração, restaurar padrões, modo manual de bancada e
+  injeção de setpoint pela web (bancada — testa a malha fechada/PID sem gerador
+  de PWM; só atua no modo `Run`, com keepalive de 3 s).
 
 API HTTP (form-encoded/JSON): `GET /api/status`, `GET|POST /api/params`,
-`POST /api/cal`, `POST /api/manual`, `POST /api/defaults`.
+`POST /api/cal`, `POST /api/manual`, `POST /api/setpoint`, `POST /api/defaults`.
 
 ## Hardware
 
