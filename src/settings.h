@@ -4,7 +4,10 @@
 // Parâmetros ajustáveis pela página web, persistidos na NVS (namespace "cfg").
 // Persistência por blob versionado: mudou o layout da struct → bump SETTINGS_VERSION
 // (a carga com versão diferente volta aos defaults).
-constexpr uint8_t SETTINGS_VERSION = 1;
+constexpr uint8_t SETTINGS_VERSION = 3;
+
+// Máx de amostras da mediana do TPS (janela ímpar); dimensiona o buffer no tps.
+constexpr uint8_t TPS_MEDIAN_MAX = 15;
 
 struct Settings {
   // PID (% de duty por % de erro de posição)
@@ -42,9 +45,19 @@ struct Settings {
   bool idleActiveLow = true;   // fecha para GND quando em idle
   uint16_t idleDebounceMs = 20;
 
-  // WiFi AP
+  // WiFi AP (rede própria do ESP; fallback quando a rede local não conecta)
   char apSsid[33] = "A3-TBC";
   char apPass[65] = "a3tbc123";  // WPA2 exige >= 8 caracteres
+
+  // WiFi STA (rede local que o ESP tenta entrar no boot; SSID vazio = desativado)
+  char staSsid[33] = "";
+  char staPass[65] = "";
+
+  // Filtro do TPS (mediana + EMA). Fica no FIM da struct de propósito: campos
+  // novos só entram aqui para a migração append-only preservar o que já foi
+  // salvo (ver settings::begin()).
+  float tpsEmaAlpha = 0.2f;      // EMA: 0<α≤1 (1 = sem suavização; menor = mais suave)
+  uint8_t tpsMedianSamples = 5;  // mediana: nº ímpar 1..TPS_MEDIAN_MAX (1 = desliga)
 };
 
 namespace settings {

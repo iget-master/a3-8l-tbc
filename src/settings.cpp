@@ -61,6 +61,19 @@ void sanitize(Settings& s) {
   s.apPass[sizeof(s.apPass) - 1] = '\0';
   if (s.apSsid[0] == '\0') strlcpy(s.apSsid, def.apSsid, sizeof(s.apSsid));
   if (strlen(s.apPass) < 8) strlcpy(s.apPass, def.apPass, sizeof(s.apPass));
+
+  // STA: só garante terminador. SSID vazio = desativado; senha vazia = rede
+  // aberta. A validade real (rede existe/senha certa) é resolvida no boot, com
+  // fallback para o AP.
+  s.staSsid[sizeof(s.staSsid) - 1] = '\0';
+  s.staPass[sizeof(s.staPass) - 1] = '\0';
+
+  // Filtro do TPS: α em (0,1]; mediana em [1, TPS_MEDIAN_MAX] e sempre ímpar
+  // (mediana bem definida).
+  s.tpsEmaAlpha = clampf(s.tpsEmaAlpha, 0.01f, 1.0f, def.tpsEmaAlpha);
+  if (s.tpsMedianSamples < 1) s.tpsMedianSamples = 1;
+  if (s.tpsMedianSamples > TPS_MEDIAN_MAX) s.tpsMedianSamples = TPS_MEDIAN_MAX;
+  if ((s.tpsMedianSamples & 1u) == 0) s.tpsMedianSamples++;
 }
 
 }  // namespace
@@ -72,10 +85,15 @@ void begin() {
   bool loaded = false;
   // readOnly: falha se o namespace ainda não existe (primeiro boot) → defaults.
   if (prefs.begin(kNamespace, /*readOnly=*/true)) {
-    if (prefs.getUChar(kKeyVer, 0) == SETTINGS_VERSION &&
-        prefs.getBytesLength(kKeyBlob) == sizeof(Settings)) {
-      Settings tmp;
-      if (prefs.getBytes(kKeyBlob, &tmp, sizeof(tmp)) == sizeof(tmp)) {
+    const uint8_t ver = prefs.getUChar(kKeyVer, 0);
+    const size_t len = prefs.getBytesLength(kKeyBlob);
+    // Migração append-only: campos novos só entram no FIM da struct, então um
+    // blob de versão anterior (menor) é carregado sobre os defaults — os campos
+    // acrescentados ficam no padrão e o resto (inclusive credenciais WiFi) é
+    // preservado. Tamanho maior que o atual = layout desconhecido → defaults.
+    if (ver >= 1 && ver <= SETTINGS_VERSION && len > 0 && len <= sizeof(Settings)) {
+      Settings tmp;  // defaults primeiro; o blob sobrescreve só os bytes antigos
+      if (prefs.getBytes(kKeyBlob, &tmp, len) == len) {
         g_settings = tmp;
         loaded = true;
       }

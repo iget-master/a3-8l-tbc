@@ -45,4 +45,11 @@ float pidD();
 void requestCalibration();               // só inicia se idle ativo
 void setManual(bool on, float dutyPct);  // keepalive: rechamadas renovam o prazo
 bool manualActive();
+
+// Override do setpoint pela web (bancada, sem gerador de PWM de comando):
+// injeta o setpoint no lugar do sinal de comando para testar a malha fechada
+// (PID). Só tem efeito no modo Run; keepalive de 3 s (rechamadas renovam), como
+// o modo manual.
+void setSetpointOverride(bool on, float setpointPct);
+bool setpointOverrideActive();
 }

@@ -18,6 +18,7 @@ constexpr uint32_t kBootSettleMs = 500;     // espera sinais assentarem no boot
 constexpr uint32_t kTpsBadMs = 100;         // implausível contínuo → Fault
 constexpr uint32_t kTpsRecoverMs = 500;     // plausível contínuo → recupera
 constexpr uint32_t kManualTimeoutMs = 3000; // keepalive do modo manual
+constexpr uint32_t kSpOverrideTimeoutMs = 3000; // keepalive do override de setpoint
 
 constexpr const char* kFaultTps = "TPS implausível";
 constexpr const char* kFaultNoCal = "sem calibração";
@@ -45,6 +46,11 @@ uint32_t s_tpsGoodSinceMs = 0;
 // Modo manual
 float s_manualDuty = 0.0f;
 uint32_t s_manualKickMs = 0;
+
+// Override do setpoint pela web (bancada, sem PWM de comando)
+bool s_spOverride = false;
+float s_spOverrideValue = 0.0f;
+uint32_t s_spOverrideKickMs = 0;
 
 // Telemetria
 float s_setpointPct = 0.0f;
@@ -115,12 +121,20 @@ void runCycle(uint32_t now, float dt) {
 
   updateTpsWatch(now);
 
-  // Telemetria base, válida em qualquer modo. Duty do comando (0..100%) →
-  // setpoint com sinal (−100..+100%, 50% de duty = repouso).
+  // Telemetria base, válida em qualquer modo.
   s_positionPct = calibration::positionPct(tps::raw());
-  s_setpointPct = pwm_input::signalPresent()
-                      ? 2.0f * pwm_input::dutyPct() - 100.0f
-                      : 0.0f;
+
+  // Setpoint: normalmente do PWM de comando (0/50/100% → −100/0/+100). Na
+  // bancada (sem gerador de PWM) um override pela web injeta o setpoint e conta
+  // como "comando presente"; expira sem keepalive (3 s), como o modo manual.
+  const bool spOvr =
+      s_spOverride && now - s_spOverrideKickMs < kSpOverrideTimeoutMs;
+  if (!spOvr) s_spOverride = false;
+  const bool cmdPresent = spOvr || pwm_input::signalPresent();
+  s_setpointPct = spOvr ? s_spOverrideValue
+                        : (pwm_input::signalPresent()
+                               ? 2.0f * pwm_input::dutyPct() - 100.0f
+                               : 0.0f);
 
   // TPS implausível derruba qualquer modo — exceto Boot, Fault e Manual:
   // o modo manual de bancada opera em malha aberta e serve justamente para
@@ -155,9 +169,9 @@ void runCycle(uint32_t now, float dt) {
         s_mode = Mode::DriverActive;
         break;
       }
-      if (!pwm_input::signalPresent()) {
-        // Failsafe: sem sinal de comando → motor solto, a mola leva a
-        // borboleta ao repouso (não fechar ativamente até o mínimo).
+      if (!cmdPresent) {
+        // Failsafe: sem comando (nem PWM nem override de bancada) → motor solto,
+        // a mola leva a borboleta ao repouso (não fechar ativamente até o mínimo).
         hbridge::disable();
         s_pid.reset();
         break;
@@ -312,5 +326,20 @@ void setManual(bool on, float dutyPct) {
 }
 
 bool manualActive() { return s_mode == Mode::Manual; }
+
+void setSetpointOverride(bool on, float setpointPct) {
+  if (!on) {
+    s_spOverride = false;
+    return;
+  }
+  s_spOverrideValue =
+      isnan(setpointPct) ? 0.0f : constrain(setpointPct, -100.0f, 100.0f);
+  s_spOverrideKickMs = millis();  // rearma o keepalive
+  s_spOverride = true;
+}
+
+bool setpointOverrideActive() {
+  return s_spOverride && millis() - s_spOverrideKickMs < kSpOverrideTimeoutMs;
+}
 
 }  // namespace control

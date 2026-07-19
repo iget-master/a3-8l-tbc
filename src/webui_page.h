@@ -91,6 +91,20 @@ travada) o firmware desliga o motor em 3 s.</p>
 </div>
 
 <div class="card">
+<h2>Setpoint (bancada / malha fechada)</h2>
+<p class="warnbox">⚠ Injeta o setpoint pela web no lugar do PWM de comando, para
+testar a malha fechada (PID) em bancada. Só atua no modo <b>Run</b> (idle ativo e
+calibração válida). Sem keepalive (aba fechada/travada) expira em 3 s e volta ao
+sinal real.</p>
+<label class="chk"><input type="checkbox" id="spOn"> injetar setpoint</label>
+<div class="manrow">
+<input type="range" id="spVal" min="-100" max="100" step="1" value="0" disabled>
+<b id="spValLbl">0 %</b>
+</div>
+<p class="hint">−100% = mínimo · 0 = repouso · +100% = máximo. O PID atua no motor até a posição bater com o setpoint.</p>
+</div>
+
+<div class="card">
 <h2>Parâmetros</h2>
 <form id="pform" onsubmit="return false">
 <div class="pgrid">
@@ -112,6 +126,9 @@ travada) o firmware desliga o motor em 3 s.</p>
 <fieldset><legend>TPS</legend>
 <label class="f"><span>Falha abaixo de (raw)</span><input id="tpsFaultLowRaw" type="number" step="1"></label>
 <label class="f"><span>Falha acima de (raw)</span><input id="tpsFaultHighRaw" type="number" step="1"></label>
+<label class="f"><span>Filtro EMA α (0–1)</span><input id="tpsEmaAlpha" type="number" step="any"></label>
+<label class="f"><span>Mediana (ímpar, 1–15)</span><input id="tpsMedianSamples" type="number" step="2" min="1" max="15"></label>
+<p class="hint">α menor = mais suave, porém mais lag. Mediana maior = mata mais spikes.</p>
 </fieldset>
 <fieldset><legend>Calibração</legend>
 <label class="f"><span>Estabilização (ms)</span><input id="calSettleMs" type="number" step="1"></label>
@@ -129,10 +146,15 @@ travada) o firmware desliga o motor em 3 s.</p>
 <label class="f"><span>Ativo em nível baixo</span><input id="idleActiveLow" type="checkbox"></label>
 <label class="f"><span>Debounce (ms)</span><input id="idleDebounceMs" type="number" step="1"></label>
 </fieldset>
-<fieldset><legend>WiFi (AP)</legend>
+<fieldset><legend>WiFi (AP próprio / fallback)</legend>
 <label class="f"><span>SSID</span><input id="apSsid" type="text" maxlength="32"></label>
 <label class="f"><span>Senha (≥ 8)</span><input id="apPass" type="text" maxlength="64"></label>
-<p class="hint">SSID/senha valem após reiniciar o ESP32.</p>
+<p class="hint">Rede do próprio ESP, usada quando a rede local não conecta. Vale após reiniciar.</p>
+</fieldset>
+<fieldset><legend>WiFi (rede local / STA)</legend>
+<label class="f"><span>SSID</span><input id="staSsid" type="text" maxlength="32"></label>
+<label class="f"><span>Senha</span><input id="staPass" type="text" maxlength="64"></label>
+<p class="hint">No boot tenta conectar nesta rede; se não achar, sobe o AP. SSID vazio = desativado. Vale após reiniciar.</p>
 </fieldset>
 </div>
 <div class="btnrow">
@@ -156,10 +178,10 @@ atuador até os fins de curso.</p>
 var el=function(id){return document.getElementById(id);};
 var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
-var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','calDrivePct'];
-var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs'];
+var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','calDrivePct','tpsEmaAlpha'];
+var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs'];
 var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','idleActiveLow'];
-var TEXTS=['apSsid','apPass'];
+var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}
 
@@ -176,7 +198,7 @@ function render(s){
   el('sMode').className='v'+(s.mode==='Fault'?' err':(s.mode==='Manual'||s.mode==='Calibrating')?' warn':'');
   t('sFault',s.fault||'—');el('sFault').className='v'+(s.fault?' err':'');
   t('sIdle',s.idle?'sim':'não');
-  t('sSp',s.setpoint.toFixed(1)+' %');
+  t('sSp',s.setpoint.toFixed(1)+' %'+(s.spOvr?' (bancada)':''));
   t('sPos',s.pos.toFixed(1)+' %');
   t('sDuty',s.duty.toFixed(1)+' %');
   t('sAout',s.analogOut.toFixed(1)+' %');
@@ -245,6 +267,23 @@ el('manOn').addEventListener('change',function(){
   sendManual();
 });
 setInterval(function(){if(el('manOn').checked)sendManual();},1000);
+
+function sendSetpoint(){
+  var on=el('spOn').checked;
+  post('/api/setpoint','on='+(on?1:0)+'&sp='+(on?el('spVal').value:0));
+}
+var spT=null;
+el('spVal').addEventListener('input',function(){
+  t('spValLbl',this.value+' %');
+  if(!spT)spT=setTimeout(function(){spT=null;sendSetpoint();},150);
+});
+el('spVal').addEventListener('change',sendSetpoint);
+el('spOn').addEventListener('change',function(){
+  el('spVal').disabled=!this.checked;
+  if(!this.checked){el('spVal').value=0;t('spValLbl','0 %');}
+  sendSetpoint();
+});
+setInterval(function(){if(el('spOn').checked)sendSetpoint();},1000);
 
 el('btnSave').addEventListener('click',saveParams);
 el('btnCal').addEventListener('click',function(){

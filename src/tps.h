@@ -2,7 +2,8 @@
 #include <Arduino.h>
 
 // Leitura filtrada do potenciômetro de posição (PIN_TPS, ADC1, atenuação 11 dB).
-// Filtro: mediana de 5 amostras + média exponencial.
+// Filtro: mediana (nº ímpar de amostras) + média exponencial (α); ambos
+// configuráveis pela web (settings tpsMedianSamples / tpsEmaAlpha).
 namespace tps {
 void begin();
 void poll();          // uma amostra por chamada; chamar a cada loop()

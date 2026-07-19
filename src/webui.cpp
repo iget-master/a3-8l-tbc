@@ -17,6 +17,14 @@ namespace {
 
 WebServer s_server(80);
 
+// Rede: no boot tenta entrar na rede local (STA) se houver SSID configurado.
+// Se não conectar dentro do timeout, sobe o próprio AP como fallback.
+enum class NetState { Connecting, Sta, Ap };
+NetState s_net = NetState::Ap;
+uint32_t s_staStartMs = 0;
+uint32_t s_lastLogMs = 0;
+constexpr uint32_t kStaConnectTimeoutMs = 15000;
+
 template <typename T>
 T clampv(T v, T lo, T hi) {
   return v < lo ? lo : (v > hi ? hi : v);
@@ -100,7 +108,7 @@ void handleStatus() {
       "\"idle\":%s,\"setpoint\":%.2f,\"pos\":%.2f,\"duty\":%.2f,"
       "\"analogOut\":%.2f,\"rawTps\":%u,\"cmdDuty\":%.2f,\"cmdFreq\":%.1f,"
       "\"cmdPresent\":%s,\"pidP\":%.2f,\"pidI\":%.2f,\"pidD\":%.2f,"
-      "\"manual\":%s,\"cal\":{\"state\":\"%s\",\"rest\":%u,\"min\":%u,"
+      "\"manual\":%s,\"spOvr\":%s,\"cal\":{\"state\":\"%s\",\"rest\":%u,\"min\":%u,"
       "\"max\":%u,\"valid\":%s,\"learnedMax\":%u}}",
       FW_VERSION, (unsigned long)millis(), control::modeName(),
       control::faultReason(), b(control::idleActive()),
@@ -110,6 +118,7 @@ void handleStatus() {
       (double)pwm_input::freqHz(), b(pwm_input::signalPresent()),
       (double)control::pidP(), (double)control::pidI(),
       (double)control::pidD(), b(control::manualActive()),
+      b(control::setpointOverrideActive()),
       calibration::stateName(), (unsigned)cal.restRaw, (unsigned)cal.minRaw,
       (unsigned)cal.maxRaw, b(cal.valid),
       (unsigned)calibration::learnedMaxRaw());
@@ -117,31 +126,38 @@ void handleStatus() {
 }
 
 void handleParamsGet() {
-  static char buf[1280];
+  static char buf[2048];
   const Settings& s = settings::get();
   char ssid[6 * sizeof(s.apSsid)];  // pior caso: tudo \u00XX
   char pass[6 * sizeof(s.apPass)];
+  char staSsid[6 * sizeof(s.staSsid)];
+  char staPass[6 * sizeof(s.staPass)];
   jsonEscape(s.apSsid, ssid, sizeof(ssid));
   jsonEscape(s.apPass, pass, sizeof(pass));
+  jsonEscape(s.staSsid, staSsid, sizeof(staSsid));
+  jsonEscape(s.staPass, staPass, sizeof(staPass));
   const int n = snprintf(
       buf, sizeof(buf),
       "{\"kp\":%.3f,\"ki\":%.3f,\"kd\":%.3f,\"deadbandPct\":%.2f,"
       "\"maxDutyPct\":%.2f,\"loopHz\":%u,\"cmdTimeoutMs\":%u,"
       "\"cmdStuckHighIs100\":%s,\"pwmFreqHz\":%lu,\"tpsFaultLowRaw\":%u,"
-      "\"tpsFaultHighRaw\":%u,\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
+      "\"tpsFaultHighRaw\":%u,\"tpsEmaAlpha\":%.3f,\"tpsMedianSamples\":%u,"
+      "\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
       "\"outMinRaw\":%u,\"outMaxRaw\":%u,\"outAutoLearnMax\":%s,"
       "\"idleActiveLow\":%s,\"idleDebounceMs\":%u,"
-      "\"apSsid\":\"%s\",\"apPass\":\"%s\"}",
+      "\"apSsid\":\"%s\",\"apPass\":\"%s\","
+      "\"staSsid\":\"%s\",\"staPass\":\"%s\"}",
       (double)s.kp, (double)s.ki, (double)s.kd, (double)s.deadbandPct,
       (double)s.maxDutyPct, (unsigned)s.loopHz, (unsigned)s.cmdTimeoutMs,
       b(s.cmdStuckHighIs100), (unsigned long)s.pwmFreqHz,
       (unsigned)s.tpsFaultLowRaw, (unsigned)s.tpsFaultHighRaw,
+      (double)s.tpsEmaAlpha, (unsigned)s.tpsMedianSamples,
       (unsigned)s.calSettleMs, (unsigned)s.calStabilityCounts,
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
       (double)s.calDrivePct, (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
       b(s.outAutoLearnMax), b(s.idleActiveLow), (unsigned)s.idleDebounceMs,
-      ssid, pass);
+      ssid, pass, staSsid, staPass);
   sendJsonOrOverflow(buf, n, sizeof(buf));
 }
 
@@ -162,6 +178,9 @@ void handleParamsPost() {
   s.pwmFreqHz = (uint32_t)argLong("pwmFreqHz", s.pwmFreqHz, 1000, 40000);
   s.tpsFaultLowRaw = (uint16_t)argLong("tpsFaultLowRaw", s.tpsFaultLowRaw, 0, 4095);
   s.tpsFaultHighRaw = (uint16_t)argLong("tpsFaultHighRaw", s.tpsFaultHighRaw, 0, 4095);
+  s.tpsEmaAlpha = argFloat("tpsEmaAlpha", s.tpsEmaAlpha, 0.01f, 1.0f);
+  s.tpsMedianSamples =
+      (uint8_t)argLong("tpsMedianSamples", s.tpsMedianSamples, 1, TPS_MEDIAN_MAX);
   s.calSettleMs = (uint16_t)argLong("calSettleMs", s.calSettleMs, 50, 10000);
   s.calStabilityCounts = (uint16_t)argLong("calStabilityCounts", s.calStabilityCounts, 1, 1000);
   s.calTimeoutMs = (uint32_t)argLong("calTimeoutMs", s.calTimeoutMs, 500, 60000);
@@ -189,6 +208,20 @@ void handleParamsPost() {
     }
   }
 
+  // Rede local (STA): SSID vazio = desativa; senha vazia = rede aberta.
+  if (s_server.hasArg("staSsid")) {
+    const String v = s_server.arg("staSsid");
+    if (v.length() < sizeof(s.staSsid) && !hasControlChars(v)) {
+      strlcpy(s.staSsid, v.c_str(), sizeof(s.staSsid));
+    }
+  }
+  if (s_server.hasArg("staPass")) {
+    const String v = s_server.arg("staPass");
+    if (v.length() < sizeof(s.staPass) && !hasControlChars(v)) {
+      strlcpy(s.staPass, v.c_str(), sizeof(s.staPass));
+    }
+  }
+
   settings::save();
   if (s.pwmFreqHz != oldFreq) hbridge::setFrequency(s.pwmFreqHz);
   sendOk();
@@ -200,6 +233,14 @@ void handleManual() {
       ? clampv(s_server.arg("duty").toFloat(), -100.0f, 100.0f)
       : 0.0f;
   control::setManual(on, duty);
+  sendOk();
+}
+
+void handleSetpoint() {
+  const bool on = s_server.arg("on").toInt() != 0;
+  const float sp =
+      on ? clampv(s_server.arg("sp").toFloat(), -100.0f, 100.0f) : 0.0f;
+  control::setSetpointOverride(on, sp);
   sendOk();
 }
 
@@ -218,24 +259,75 @@ void handleDefaults() {
   sendOk();
 }
 
+// Sobe o AP próprio (rede de configuração e de fallback) e loga o IP.
+void startAP() {
+  const Settings& s = settings::get();
+  WiFi.mode(WIFI_AP);
+  const bool ok = WiFi.softAP(s.apSsid, s.apPass);
+  Serial.printf("[webui] AP %s: SSID=\"%s\" IP=%s\n", ok ? "OK" : "FALHOU",
+                s.apSsid, WiFi.softAPIP().toString().c_str());
+}
+
 }  // namespace
 
 void begin() {
   const Settings& s = settings::get();
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(s.apSsid, s.apPass);
+
+  if (s.staSsid[0] != '\0') {
+    // Rede local configurada → tenta entrar como estação (não bloqueia; o
+    // resultado é acompanhado em loop(), com fallback para o AP).
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(s.staSsid, s.staPass);
+    s_staStartMs = millis();
+    s_lastLogMs = s_staStartMs;
+    s_net = NetState::Connecting;
+    Serial.printf("[webui] STA: tentando conectar em \"%s\"...\n", s.staSsid);
+  } else {
+    startAP();
+    s_net = NetState::Ap;
+  }
 
   s_server.on("/", HTTP_GET, handleRoot);
   s_server.on("/api/status", HTTP_GET, handleStatus);
   s_server.on("/api/params", HTTP_GET, handleParamsGet);
   s_server.on("/api/params", HTTP_POST, handleParamsPost);
   s_server.on("/api/manual", HTTP_POST, handleManual);
+  s_server.on("/api/setpoint", HTTP_POST, handleSetpoint);
   s_server.on("/api/cal", HTTP_POST, handleCal);
   s_server.on("/api/defaults", HTTP_POST, handleDefaults);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "not found"); });
   s_server.begin();
 }
 
-void loop() { s_server.handleClient(); }
+void loop() {
+  s_server.handleClient();
+
+  if (s_net != NetState::Connecting) return;
+
+  const wl_status_t st = WiFi.status();
+  if (st == WL_CONNECTED) {
+    s_net = NetState::Sta;
+    const String ip = WiFi.localIP().toString();
+    Serial.printf("[webui] STA conectado: IP=%s  ->  http://%s/\n", ip.c_str(),
+                  ip.c_str());
+    return;
+  }
+
+  const uint32_t now = millis();
+  const bool failed = (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED);
+  if (failed || now - s_staStartMs > kStaConnectTimeoutMs) {
+    Serial.printf("[webui] STA sem conexão (status=%d); subindo AP de fallback\n",
+                  (int)st);
+    startAP();
+    s_net = NetState::Ap;
+    return;
+  }
+
+  if (now - s_lastLogMs > 2000) {
+    s_lastLogMs = now;
+    Serial.printf("[webui] STA conectando... (status=%d)\n", (int)st);
+  }
+}
 
 }  // namespace webui
