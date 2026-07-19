@@ -5,6 +5,58 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.5.1] - 2026-07-19
+
+### Corrigido
+
+- **Posição satura em ±100%**: leitura do TPS acima do máx (ou abaixo do mín)
+  calibrado não extrapola mais além de +100%/−100%. Vale para a telemetria e
+  para a medição que alimenta o PID (`calibration::positionPct`).
+
+## [0.5.0] - 2026-07-19
+
+### Adicionado
+
+- **Filtro do TPS configurável pela web**: `α` da EMA e o nº de amostras da
+  mediana (ímpar, 1–15) agora são parâmetros na página, persistidos na NVS —
+  permite ajustar o compromisso ruído × lag (relevante para o termo derivativo
+  do PID) sem recompilar.
+
+### Alterado
+
+- Persistência da NVS agora faz **migração append-only**: campos novos entram
+  no fim da struct de `Settings` e um blob de versão anterior é carregado sobre
+  os padrões, **preservando a configuração salva** (inclusive credenciais WiFi)
+  em atualizações de firmware. `SETTINGS_VERSION` 2 → 3.
+
+## [0.4.0] - 2026-07-19
+
+### Adicionado
+
+- **Override de setpoint pela web (bancada)**: slider na página que injeta o
+  setpoint no lugar do PWM de comando, permitindo testar a malha fechada (PID)
+  sem gerador de sinal. Só atua no modo `Run` (idle ativo + calibração válida) e
+  conta como "comando presente"; keepalive de 3 s (a página reenvia a cada 1 s),
+  como o modo manual. Endpoint `POST /api/setpoint` e campo `spOvr` no
+  `/api/status`.
+
+## [0.3.0] - 2026-07-18
+
+### Adicionado
+
+- **Modo estação (STA) com fallback para AP**: no boot, havendo uma rede local
+  configurada (SSID/senha), o ESP tenta conectar nela; se não achar ou não
+  conectar em ~15 s, sobe o próprio AP (`A3-TBC`) como antes. Permite acessar a
+  página pela rede local (LAN), útil para depuração.
+- Campos de SSID/senha da rede local (STA) na página web, persistidos na NVS
+  (separados das credenciais do AP próprio).
+- Logs de rede na serial (115200): estado do AP, tentativa de STA e IP obtido.
+
+### Alterado
+
+- Layout de configuração na NVS ganhou os campos de STA (`SETTINGS_VERSION`
+  1 → 2); parâmetros salvos anteriormente voltam aos padrões neste upgrade.
+
 ## [0.2.0] - 2026-07-17
 
 ### Alterado
