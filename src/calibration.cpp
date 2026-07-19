@@ -251,7 +251,9 @@ float positionPct(uint16_t rawValue) {
   const int32_t span = raw >= rest ? (int32_t)g_data.maxRaw - rest
                                    : rest - (int32_t)g_data.minRaw;
   if (span <= 0) return 0.0f;
-  return 100.0f * (float)(raw - rest) / (float)span;
+  const float pct = 100.0f * (float)(raw - rest) / (float)span;
+  // Satura em ±100%: leitura além do máx/mín calibrado não extrapola a faixa.
+  return pct > 100.0f ? 100.0f : (pct < -100.0f ? -100.0f : pct);
 }
 
 uint16_t learnedMaxRaw() { return s_learnedMax; }

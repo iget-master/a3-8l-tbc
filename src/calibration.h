@@ -38,7 +38,7 @@ const Data& data();
 // Normalização com sinal pela calibração: −100% = minRaw, 0% = restRaw
 // (repouso da mola), +100% = maxRaw. Linear por partes — rampas distintas
 // abaixo e acima do repouso (o repouso raramente é o centro geométrico).
-// Sem clamp.
+// Satura em ±100%: leitura além do máx/mín calibrado não extrapola a faixa.
 float positionPct(uint16_t rawValue);
 
 // Máximo do TPS aprendido fora de idle (usado no mapeamento da saída analógica).
