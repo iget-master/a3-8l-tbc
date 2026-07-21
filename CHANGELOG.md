@@ -5,6 +5,25 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-07-21
+
+### Adicionado
+
+- **Sensor de corrente da ponte (IS do IBT-2/BTS7960)** no GPIO33 (ADC1):
+  módulo `isense` lê R_IS+L_IS filtrado e normaliza pela duty aplicada
+  (estimativa @100%). Detecta, com limiares e persistências configuráveis pela
+  web: **fim de curso** (stall — telemetria na página), **curto no motor** e
+  **motor desconectado** — os dois últimos derrubam para `Fault` **retida**
+  (sem auto-recuperação; vale também em Manual/Calibrating), com limpeza pelo
+  botão "Limpar falha do motor" (`POST /api/faultclear`). Desabilitado por
+  padrão (`isenseEnabled`) — sem o circuito, o pino flutua.
+- Página: tiles "Corrente ponte (raw)" e "Fim de curso" no monitor; fieldset
+  "Corrente do motor" nos parâmetros; campos `mCur`/`mCurEst`/`stall`/`mLatch`
+  no `/api/status`.
+- Hardware: `docs/hardware.md` ganha a seção do IBT-2 (mapeamento de pinos,
+  rede do IS com 680 Ω + RC, nota sobre o resistor onboard) e o GPIO33 no
+  pinout (`PIN_ISENSE`).
+
 ## [0.5.1] - 2026-07-19
 
 ### Corrigido
