@@ -149,6 +149,12 @@ para diagnosticar e disparar a calibração manualmente (respeitando o idle).
   **motor solto (coast)**: a mola leva a borboleta ao repouso. Sinal preso em
   nível alto pode, opcionalmente (`cmdStuckHighIs100`, default ligado), valer
   duty 100% (= setpoint +100).
+- **Corrente da ponte (IS do IBT-2, opcional — `isenseEnabled`)**: sob drive,
+  corrente sustentada acima do limiar de curto ou abaixo do de desconexão →
+  `Fault` **retida** ("curto no motor" / "motor desconectado"; vale também nos
+  modos Manual e Calibrating). Não há auto-recuperação: limpar pela web (botão
+  "Limpar falha do motor") ou reiniciar. O mesmo sensor expõe **fim de curso**
+  (stall) como telemetria na página.
 - **Watchdog de tarefa** no loop principal (task WDT, ~5 s): travamento do
   firmware → reset, e o boot reinicializa com a ponte H desabilitada.
 - Modo manual expira em 3 s sem keepalive.
@@ -177,7 +183,8 @@ ESP sobe seu **próprio AP** (default: SSID `A3-TBC`, senha `a3tbc123` —
   de PWM; só atua no modo `Run`, com keepalive de 3 s).
 
 API HTTP (form-encoded/JSON): `GET /api/status`, `GET|POST /api/params`,
-`POST /api/cal`, `POST /api/manual`, `POST /api/setpoint`, `POST /api/defaults`.
+`POST /api/cal`, `POST /api/manual`, `POST /api/setpoint`,
+`POST /api/faultclear`, `POST /api/defaults`.
 
 ## Hardware
 

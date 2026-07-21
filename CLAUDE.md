@@ -44,6 +44,7 @@ montado à mão).
 | `tps` | Leitura filtrada do potenciômetro de posição (ADC1) |
 | `pwm_input` | Medição do duty do sinal PWM de comando (ISR) |
 | `hbridge` | Ponte H via LEDC — duty com sinal (abre/fecha/coast) |
+| `isense` | Corrente da ponte (IS do IBT-2) — fim de curso e falha de motor |
 | `pid` | PID com anti-windup e derivada na medição |
 | `calibration` | Auto calibração (repouso/máx/mín) + NVS + máx aprendido do TPS |
 | `analog_out` | DAC (GPIO25) 0–100% → 0–3,3 V |
