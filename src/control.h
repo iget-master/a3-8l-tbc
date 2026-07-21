@@ -52,4 +52,9 @@ bool manualActive();
 // o modo manual.
 void setSetpointOverride(bool on, float setpointPct);
 bool setpointOverrideActive();
+
+// Falha de motor (curto/desconexão, via isense) fica RETIDA: não há
+// auto-recuperação — limpar pela web (ou reboot) após inspecionar o chicote.
+void clearMotorFault();
+bool motorFaultLatched();
 }

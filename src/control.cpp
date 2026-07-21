@@ -5,6 +5,7 @@
 #include "analog_out.h"
 #include "calibration.h"
 #include "hbridge.h"
+#include "isense.h"
 #include "pid.h"
 #include "pins.h"
 #include "pwm_input.h"
@@ -22,6 +23,8 @@ constexpr uint32_t kSpOverrideTimeoutMs = 3000; // keepalive do override de setp
 
 constexpr const char* kFaultTps = "TPS implausível";
 constexpr const char* kFaultNoCal = "sem calibração";
+constexpr const char* kFaultMotorShort = "curto no motor";
+constexpr const char* kFaultMotorOpen = "motor desconectado";
 
 Mode s_mode = Mode::Boot;
 const char* s_faultReason = "";
@@ -46,6 +49,9 @@ uint32_t s_tpsGoodSinceMs = 0;
 // Modo manual
 float s_manualDuty = 0.0f;
 uint32_t s_manualKickMs = 0;
+
+// Falha de motor (curto/desconexão) é retida até limpeza explícita
+bool s_motorFaultLatched = false;
 
 // Override do setpoint pela web (bancada, sem PWM de comando)
 bool s_spOverride = false;
@@ -144,6 +150,21 @@ void runCycle(uint32_t now, float dt) {
     setFault(kFaultTps);
   }
 
+  // Corrente da ponte: curto/desconexão derrubam qualquer modo que acione o
+  // motor — inclusive Manual e Calibrating (setFault já aborta a calibração).
+  // A falha fica retida (sem auto-recuperação): chicote se inspeciona, não se
+  // "tenta de novo".
+  isense::evaluate(now, hbridge::appliedDuty());
+  if (s_mode != Mode::Boot && s_mode != Mode::Fault) {
+    if (isense::shortCircuit()) {
+      s_motorFaultLatched = true;
+      setFault(kFaultMotorShort);
+    } else if (isense::openCircuit()) {
+      s_motorFaultLatched = true;
+      setFault(kFaultMotorOpen);
+    }
+  }
+
   switch (s_mode) {
     case Mode::Boot:
       if (now - s_bootMs >= kBootSettleMs) {
@@ -205,6 +226,7 @@ void runCycle(uint32_t now, float dt) {
 
     case Mode::Fault:
       hbridge::disable();  // garante estado seguro a cada ciclo
+      if (s_motorFaultLatched) break;  // retida: só sai por clearMotorFault()
       if (tpsBadPersistent(now)) s_faultReason = kFaultTps;
       else if (!calibration::data().valid) s_faultReason = kFaultNoCal;
       if (tpsRecovered(now) && calibration::data().valid) enterNormal(now);
@@ -253,6 +275,7 @@ void begin() {
   s_tpsBadSinceMs = now;
   s_tpsGoodSinceMs = now;
   s_faultReason = "";
+  s_motorFaultLatched = false;
   s_mode = Mode::Boot;
 }
 
@@ -341,5 +364,13 @@ void setSetpointOverride(bool on, float setpointPct) {
 bool setpointOverrideActive() {
   return s_spOverride && millis() - s_spOverrideKickMs < kSpOverrideTimeoutMs;
 }
+
+void clearMotorFault() {
+  // Solta o latch; o caso Fault reavalia TPS/calibração e recupera sozinho se
+  // estiver tudo são (mesmo caminho da recuperação de TPS).
+  s_motorFaultLatched = false;
+}
+
+bool motorFaultLatched() { return s_motorFaultLatched; }
 
 }  // namespace control

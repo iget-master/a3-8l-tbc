@@ -4,7 +4,7 @@
 // Parâmetros ajustáveis pela página web, persistidos na NVS (namespace "cfg").
 // Persistência por blob versionado: mudou o layout da struct → bump SETTINGS_VERSION
 // (a carga com versão diferente volta aos defaults).
-constexpr uint8_t SETTINGS_VERSION = 3;
+constexpr uint8_t SETTINGS_VERSION = 4;
 
 // Máx de amostras da mediana do TPS (janela ímpar); dimensiona o buffer no tps.
 constexpr uint8_t TPS_MEDIAN_MAX = 15;
@@ -58,6 +58,20 @@ struct Settings {
   // salvo (ver settings::begin()).
   float tpsEmaAlpha = 0.2f;      // EMA: 0<α≤1 (1 = sem suavização; menor = mais suave)
   uint8_t tpsMedianSamples = 5;  // mediana: nº ímpar 1..TPS_MEDIAN_MAX (1 = desliga)
+
+  // Sensor de corrente da ponte (IS do IBT-2). Limiares em counts do ADC
+  // normalizados para 100% de duty (isense::estRaw100). Regra da migração: todo
+  // bloco anexado deve COMEÇAR por um campo de 4 bytes — o blob antigo termina
+  // alinhado em 4, então os campos novos caem inteiros fora dele e mantêm os
+  // defaults ao migrar.
+  float isMinDutyPct = 25.0f;  // só avalia com |duty| acima disto (normalização confiável)
+  uint16_t isShortRaw = 3000;  // acima → curto no motor (proteção do driver ≈ satura o ADC)
+  uint16_t isOpenRaw = 15;     // abaixo → motor desconectado
+  uint16_t isStallRaw = 250;   // acima → fim de curso (stall mecânico)
+  uint16_t isShortMs = 20;     // persistência mínima de cada condição
+  uint16_t isOpenMs = 300;
+  uint16_t isStallMs = 80;
+  bool isenseEnabled = false;  // sem o circuito ligado o pino flutua → padrão OFF
 };
 
 namespace settings {

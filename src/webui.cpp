@@ -6,6 +6,7 @@
 #include "calibration.h"
 #include "control.h"
 #include "hbridge.h"
+#include "isense.h"
 #include "pwm_input.h"
 #include "settings.h"
 #include "tps.h"
@@ -108,7 +109,8 @@ void handleStatus() {
       "\"idle\":%s,\"setpoint\":%.2f,\"pos\":%.2f,\"duty\":%.2f,"
       "\"analogOut\":%.2f,\"rawTps\":%u,\"cmdDuty\":%.2f,\"cmdFreq\":%.1f,"
       "\"cmdPresent\":%s,\"pidP\":%.2f,\"pidI\":%.2f,\"pidD\":%.2f,"
-      "\"manual\":%s,\"spOvr\":%s,\"cal\":{\"state\":\"%s\",\"rest\":%u,\"min\":%u,"
+      "\"manual\":%s,\"spOvr\":%s,\"mCur\":%u,\"mCurEst\":%.0f,\"stall\":%s,"
+      "\"mLatch\":%s,\"cal\":{\"state\":\"%s\",\"rest\":%u,\"min\":%u,"
       "\"max\":%u,\"valid\":%s,\"learnedMax\":%u}}",
       FW_VERSION, (unsigned long)millis(), control::modeName(),
       control::faultReason(), b(control::idleActive()),
@@ -118,7 +120,9 @@ void handleStatus() {
       (double)pwm_input::freqHz(), b(pwm_input::signalPresent()),
       (double)control::pidP(), (double)control::pidI(),
       (double)control::pidD(), b(control::manualActive()),
-      b(control::setpointOverrideActive()),
+      b(control::setpointOverrideActive()), (unsigned)isense::raw(),
+      (double)isense::estRaw100(), b(isense::stalled()),
+      b(control::motorFaultLatched()),
       calibration::stateName(), (unsigned)cal.restRaw, (unsigned)cal.minRaw,
       (unsigned)cal.maxRaw, b(cal.valid),
       (unsigned)calibration::learnedMaxRaw());
@@ -146,6 +150,9 @@ void handleParamsGet() {
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
       "\"outMinRaw\":%u,\"outMaxRaw\":%u,\"outAutoLearnMax\":%s,"
       "\"idleActiveLow\":%s,\"idleDebounceMs\":%u,"
+      "\"isenseEnabled\":%s,\"isMinDutyPct\":%.1f,\"isShortRaw\":%u,"
+      "\"isOpenRaw\":%u,\"isStallRaw\":%u,\"isShortMs\":%u,\"isOpenMs\":%u,"
+      "\"isStallMs\":%u,"
       "\"apSsid\":\"%s\",\"apPass\":\"%s\","
       "\"staSsid\":\"%s\",\"staPass\":\"%s\"}",
       (double)s.kp, (double)s.ki, (double)s.kd, (double)s.deadbandPct,
@@ -157,6 +164,9 @@ void handleParamsGet() {
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
       (double)s.calDrivePct, (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
       b(s.outAutoLearnMax), b(s.idleActiveLow), (unsigned)s.idleDebounceMs,
+      b(s.isenseEnabled), (double)s.isMinDutyPct, (unsigned)s.isShortRaw,
+      (unsigned)s.isOpenRaw, (unsigned)s.isStallRaw, (unsigned)s.isShortMs,
+      (unsigned)s.isOpenMs, (unsigned)s.isStallMs,
       ssid, pass, staSsid, staPass);
   sendJsonOrOverflow(buf, n, sizeof(buf));
 }
@@ -191,6 +201,14 @@ void handleParamsPost() {
   s.outAutoLearnMax = argBool("outAutoLearnMax", s.outAutoLearnMax);
   s.idleActiveLow = argBool("idleActiveLow", s.idleActiveLow);
   s.idleDebounceMs = (uint16_t)argLong("idleDebounceMs", s.idleDebounceMs, 0, 500);
+  s.isenseEnabled = argBool("isenseEnabled", s.isenseEnabled);
+  s.isMinDutyPct = argFloat("isMinDutyPct", s.isMinDutyPct, 5.0f, 100.0f);
+  s.isShortRaw = (uint16_t)argLong("isShortRaw", s.isShortRaw, 0, 4095);
+  s.isOpenRaw = (uint16_t)argLong("isOpenRaw", s.isOpenRaw, 0, 4095);
+  s.isStallRaw = (uint16_t)argLong("isStallRaw", s.isStallRaw, 0, 4095);
+  s.isShortMs = (uint16_t)argLong("isShortMs", s.isShortMs, 5, 1000);
+  s.isOpenMs = (uint16_t)argLong("isOpenMs", s.isOpenMs, 20, 5000);
+  s.isStallMs = (uint16_t)argLong("isStallMs", s.isStallMs, 10, 2000);
 
   if (s_server.hasArg("apSsid")) {
     const String v = s_server.arg("apSsid");
@@ -249,6 +267,11 @@ void handleCal() {
   sendOk();
 }
 
+void handleFaultClear() {
+  control::clearMotorFault();
+  sendOk();
+}
+
 void handleDefaults() {
   const uint32_t oldFreq = settings::get().pwmFreqHz;
   settings::resetDefaults();
@@ -295,6 +318,7 @@ void begin() {
   s_server.on("/api/manual", HTTP_POST, handleManual);
   s_server.on("/api/setpoint", HTTP_POST, handleSetpoint);
   s_server.on("/api/cal", HTTP_POST, handleCal);
+  s_server.on("/api/faultclear", HTTP_POST, handleFaultClear);
   s_server.on("/api/defaults", HTTP_POST, handleDefaults);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "not found"); });
   s_server.begin();

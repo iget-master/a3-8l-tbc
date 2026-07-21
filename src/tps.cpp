@@ -45,7 +45,7 @@ void fillWindow(uint16_t v, uint8_t n) {
 }  // namespace
 
 void begin() {
-  analogReadResolution(12);  // global — única entrada analógica do projeto
+  analogReadResolution(12);  // global — vale também para o isense (mesmo ADC1)
   analogSetPinAttenuation(PIN_TPS, ADC_11db);
   // Pré-enche o filtro com uma leitura real: sem rampa a partir de zero
   // (que pareceria falha de TPS nos primeiros ciclos).

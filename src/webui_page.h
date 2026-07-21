@@ -67,6 +67,8 @@ button.danger{background:var(--err);color:#fff}
 <div class="stat"><div class="l">TPS (raw)</div><div class="v" id="sRaw">–</div></div>
 <div class="stat"><div class="l">Comando PWM</div><div class="v" id="sCmd">–</div></div>
 <div class="stat"><div class="l">Manual</div><div class="v" id="sManual">–</div></div>
+<div class="stat"><div class="l">Corrente ponte (raw)</div><div class="v" id="sCur">–</div></div>
+<div class="stat"><div class="l">Fim de curso</div><div class="v" id="sStall">–</div></div>
 <div class="stat wide"><div class="l">Termos PID</div><div class="v" id="sPid">–</div></div>
 <div class="stat"><div class="l">Calibração</div><div class="v" id="sCal">–</div></div>
 <div class="stat wide"><div class="l">Calibração (raw)</div><div class="v" id="sCalV">–</div></div>
@@ -146,6 +148,18 @@ sinal real.</p>
 <label class="f"><span>Ativo em nível baixo</span><input id="idleActiveLow" type="checkbox"></label>
 <label class="f"><span>Debounce (ms)</span><input id="idleDebounceMs" type="number" step="1"></label>
 </fieldset>
+<fieldset><legend>Corrente do motor (IS do IBT-2)</legend>
+<label class="f"><span>Habilitar detecção</span><input id="isenseEnabled" type="checkbox"></label>
+<label class="f"><span>Duty mín p/ avaliar (%)</span><input id="isMinDutyPct" type="number" step="any"></label>
+<label class="f"><span>Fim de curso ≥ (raw@100%)</span><input id="isStallRaw" type="number" step="1"></label>
+<label class="f"><span>Fim de curso por (ms)</span><input id="isStallMs" type="number" step="1"></label>
+<label class="f"><span>Curto ≥ (raw@100%)</span><input id="isShortRaw" type="number" step="1"></label>
+<label class="f"><span>Curto por (ms)</span><input id="isShortMs" type="number" step="1"></label>
+<label class="f"><span>Desconexão ≤ (raw@100%)</span><input id="isOpenRaw" type="number" step="1"></label>
+<label class="f"><span>Desconexão por (ms)</span><input id="isOpenMs" type="number" step="1"></label>
+<p class="hint">Limiares sobre a corrente normalizada p/ 100% de duty. Curto/desconexão
+→ FALHA retida (limpar em Ações). Sem o circuito de IS ligado, deixe desabilitado.</p>
+</fieldset>
 <fieldset><legend>WiFi (AP próprio / fallback)</legend>
 <label class="f"><span>SSID</span><input id="apSsid" type="text" maxlength="32"></label>
 <label class="f"><span>Senha (≥ 8)</span><input id="apPass" type="text" maxlength="64"></label>
@@ -168,6 +182,7 @@ sinal real.</p>
 <h2>Ações</h2>
 <div class="btnrow">
 <button type="button" id="btnCal">Calibrar</button>
+<button type="button" id="btnFaultClr">Limpar falha do motor</button>
 <button type="button" id="btnDef" class="danger">Restaurar padrões</button>
 </div>
 <p class="hint">A calibração só executa com o pedal solto (idle) e movimenta o
@@ -178,9 +193,9 @@ atuador até os fins de curso.</p>
 var el=function(id){return document.getElementById(id);};
 var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
-var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','calDrivePct','tpsEmaAlpha'];
-var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs'];
-var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','idleActiveLow'];
+var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','calDrivePct','tpsEmaAlpha','isMinDutyPct'];
+var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
+var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','idleActiveLow','isenseEnabled'];
 var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}
@@ -206,6 +221,9 @@ function render(s){
   t('sCmd',s.cmdPresent?s.cmdDuty.toFixed(1)+' % @ '+s.cmdFreq.toFixed(0)+' Hz':'ausente');
   t('sManual',s.manual?'ATIVO':'—');
   el('sManual').className='v'+(s.manual?' warn':'');
+  t('sCur',s.mCur+(s.mCurEst>0?' ('+s.mCurEst.toFixed(0)+' @100%)':''));
+  t('sStall',s.stall?'SIM':'—');
+  el('sStall').className='v'+(s.stall?' warn':'');
   t('sPid','P '+s.pidP.toFixed(1)+' · I '+s.pidI.toFixed(1)+' · D '+s.pidD.toFixed(1));
   t('sCal',s.cal.state+(s.cal.valid?'':' (inválida)'));
   el('sCal').className='v'+(s.cal.valid?'':' err');
@@ -292,6 +310,9 @@ el('btnCal').addEventListener('click',function(){
 el('btnDef').addEventListener('click',function(){
   if(confirm('Restaurar TODOS os parâmetros para os padrões de fábrica?'))
     post('/api/defaults').then(function(){flash('padrões restaurados');loadParams();});
+});
+el('btnFaultClr').addEventListener('click',function(){
+  post('/api/faultclear').then(function(){flash('falha do motor limpa');});
 });
 loadParams();
 </script>

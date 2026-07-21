@@ -8,5 +8,6 @@ constexpr int PIN_IDLE_SW    = 32;  // switch de idle — pull-up interno, fecha
 constexpr int PIN_HB_IN1     = 18;  // ponte H IN1 — sentido abrir
 constexpr int PIN_HB_IN2     = 19;  // ponte H IN2 — sentido fechar
 constexpr int PIN_HB_EN      = 21;  // ponte H enable/sleep (-1 se o driver não tiver)
+constexpr int PIN_ISENSE     = 33;  // ADC1_CH5 — corrente da ponte (R_IS+L_IS do IBT-2)
 constexpr int PIN_ANALOG_OUT = 25;  // DAC1 — posição mascarada 0–100%
 constexpr int PIN_LED        = 2;   // LED onboard (status)

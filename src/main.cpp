@@ -4,6 +4,7 @@
 #include "calibration.h"
 #include "control.h"
 #include "hbridge.h"
+#include "isense.h"
 #include "pins.h"
 #include "pwm_input.h"
 #include "settings.h"
@@ -43,6 +44,7 @@ void setup() {
 
   settings::begin();
   tps::begin();
+  isense::begin();
   pwm_input::begin();
   hbridge::begin();
   analog_out::begin();
@@ -55,6 +57,7 @@ void setup() {
 
 void loop() {
   tps::poll();
+  isense::poll();
   pwm_input::poll();
   control::loop();
   webui::loop();

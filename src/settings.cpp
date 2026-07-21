@@ -74,6 +74,21 @@ void sanitize(Settings& s) {
   if (s.tpsMedianSamples < 1) s.tpsMedianSamples = 1;
   if (s.tpsMedianSamples > TPS_MEDIAN_MAX) s.tpsMedianSamples = TPS_MEDIAN_MAX;
   if ((s.tpsMedianSamples & 1u) == 0) s.tpsMedianSamples++;
+
+  // Sensor de corrente: limiares em faixa e ordenados (aberto < stall < curto);
+  // ordem inválida deixaria uma condição sempre (ou nunca) verdadeira.
+  s.isMinDutyPct = clampf(s.isMinDutyPct, 5.0f, 100.0f, def.isMinDutyPct);
+  s.isShortRaw = clampv<uint16_t>(s.isShortRaw, 0, 4095);
+  s.isOpenRaw = clampv<uint16_t>(s.isOpenRaw, 0, 4095);
+  s.isStallRaw = clampv<uint16_t>(s.isStallRaw, 0, 4095);
+  s.isShortMs = clampv<uint16_t>(s.isShortMs, 5, 1000);
+  s.isOpenMs = clampv<uint16_t>(s.isOpenMs, 20, 5000);
+  s.isStallMs = clampv<uint16_t>(s.isStallMs, 10, 2000);
+  if (!(s.isOpenRaw < s.isStallRaw && s.isStallRaw < s.isShortRaw)) {
+    s.isShortRaw = def.isShortRaw;
+    s.isOpenRaw = def.isOpenRaw;
+    s.isStallRaw = def.isStallRaw;
+  }
 }
 
 }  // namespace
