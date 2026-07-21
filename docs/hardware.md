@@ -125,9 +125,18 @@ Se o sinal vier em 5 V ou 12 V, **não pode** entrar direto no ESP32 (máx. 3,3 
 ### Switch de idle → GPIO32
 
 O switch do corpo de borboleta fecha para o chassi (GND) quando o pedal está
-solto. Ligação: switch entre GPIO32 e GND, **pull-up interno** habilitado, mais
-um resistor de série de 1 kΩ e capacitor de 100 nF para GND no pino (filtro RC
-contra ruído do chicote). Debounce por software (~20 ms).
+solto. O firmware habilita o **pull-up interno** do GPIO32 (~45 kΩ) — por isso
+o switch ficou neste pino: **GPIO34–39 não têm pull-up/pull-down internos**.
+
+- **Bancada**: nada a adicionar — switch (ou jumper) direto entre GPIO32 e GND.
+- **Veículo**: o pull-up interno é fraco (~45 kΩ) e deixa o nó de impedância
+  alta — sensível a ruído/EMI numa linha longa do chicote. Reforçar com:
+  - **pull-up externo de 4,7–10 kΩ para 3V3** (soma em paralelo com o interno,
+    sem conflito) — baixa a impedância do nó e acelera a subida ao abrir o
+    switch (~1 ms com 10 kΩ + 100 nF, contra ~5 ms só com o interno);
+  - resistor de **série de 1 kΩ** e **capacitor de 100 nF para GND** no pino
+    (filtro RC contra ruído do chicote).
+- Debounce por software (~20 ms, configurável pela web) em ambos os casos.
 
 > Se no veículo o switch chavear +12 V em vez de GND, condicionar como o sinal
 > PWM (divisor/opto) e inverter a lógica no firmware.
