@@ -43,8 +43,8 @@ Pinos livres para expansão futura: GPIO16, 17, 22, 23, 26 (DAC2), 27.
                        │      GPIO21 ────┼─────────►│ R_EN+L_EN  │
                        │      GPIO33 ◄───┼─[680Ω+RC]┤ R_IS+L_IS  │
                        │                 │          └─────┬──────┘
-   Saída 0–100% ◄──[buffer]── GPIO25     │                │ VMOT = 12 V bateria
-                       │                 │                │ (fusível + diodo TVS)
+   Saída 0–100% ◄──[buffer]── GPIO25     │                │ VMOT = 12 V pós-chave
+                       │                 │                │ (fusível + TVS — ver Alimentação)
                        └─────────────────┘
 ```
 
@@ -67,9 +67,9 @@ Esquema de acionamento com IN1/IN2 (LEDC ~20 kHz para ficar inaudível):
 | Fechar (proporcional) | 0 | PWM |
 | Livre (coast) — mola leva ao repouso | 0 | 0 |
 
-A alimentação do motor (VMOT) vem dos 12 V do veículo com **fusível** e
-**diodo TVS** (ex.: SMBJ24A) para transientes de carga. GND do driver comum com
-o GND do ESP32.
+A alimentação do motor (VMOT) vem do **nó pós-chave protegido** (relé + TVS +
+fusível próprio de ~5 A — topologia na seção Alimentação). GND do driver comum
+com o GND do ESP32.
 
 ### Módulo IBT-2 (2× BTS7960) — ligação e sensor de corrente
 
@@ -161,12 +161,58 @@ O DAC entrega 0–3,3 V com pouca capacidade de corrente:
 
 ## Alimentação
 
-- 12 V do veículo (pós-chave) → regulador *buck* para **5 V** (ex.: módulo
-  MP1584 ou fonte automotiva dedicada) → pino **VIN/5V** do DevKit.
-- Proteções na entrada 12 V: fusível, diodo de polaridade reversa e TVS —
-  ambiente automotivo tem *load dump* e transientes agressivos.
-- Não alimentar o motor pelos 5 V; VMOT da ponte H vai direto nos 12 V
-  protegidos.
+Topologia: **um relé pós-chave** alimenta um nó de 12 V protegido, do qual saem
+**dois ramos com fusíveis separados** — eletrônica e ponte H. **Nada liga
+direto na bateria**, inclusive o B+ do IBT-2: a ponte é inútil sem o
+controlador (que precisa ser pós-chave pelo consumo de ~100 mA), e B+ sempre
+vivo criaria o risco de uma falha física (ex.: chicote roçado curtando RPWM ao
+12 V) acionar o motor com o carro estacionado e sem supervisão.
+
+```
+12 V bateria ──[relé pós-chave 10 A]──┬── TVS SMBJ24A → GND
+                                      │
+                     ┌────────────────┴────────────────┐
+               [fusível ~1 A]                    [fusível ~5 A]
+                     │                                 │
+        [diodo reverso] → buck LM2596-5.0        B+ / B− do IBT-2
+                     │        │                  (sem diodo série: 3–4 A
+        op-amp do DAC ◄───────┼─ 5 V              dissiparia ~3 W; usar
+        (se versão 5 V)       ▼                   conector com chaveamento
+                        VIN/5V do DevKit          mecânico contra inversão)
+                              │
+                        AMS1117-3.3 onboard → 3,3 V (ESP32, TPS, VCC do IBT-2)
+```
+
+- **12 V → 5 V: buck LM2596S-5.0** (módulo pronto; em placa própria, TPS5430).
+  Entrada absoluta de 40–45 V fica **acima do clamp do TVS** — o SMBJ24A deixa
+  passar até ~39 V num load dump. Por isso **não usar MP1584** (28 V abs. máx.,
+  abaixo do clamp) **nem 7805 no veículo**: além dos 35 V abs. máx. (também
+  abaixo do clamp), um linear dissiparia (14 − 5) V × 0,3–0,5 A = **2,7–4,5 W**
+  num cofre a 60–80 °C. Em **bancada** (fonte limpa, ambiente frio), um 7805
+  com dissipador serve.
+- **5 V → 3,3 V**: o **AMS1117-3.3 onboard do DevKit** (alimentando pelo pino
+  VIN/5V). Em placa própria sem DevKit, usar o mesmo AMS1117-3.3.
+- **Sequenciamento é indiferente**: os pull-downs do IBT-2 mantêm a ponte
+  dormindo com o ESP32 morto; ESP32 vivo com B+ morto aciona uma ponte sem
+  energia — nenhuma ordem é perigosa.
+
+### Comportamento no desligamento (desenergizado = estado seguro)
+
+1. ESP32 sem alimentação → GPIO18/19/21 em alta impedância.
+2. Os pull-downs do IBT-2 seguram RPWM/LPWM/EN em nível baixo → BTS7960 com os
+   quatro chaveamentos abertos.
+3. Saída da ponte em alta impedância — **coast, não freio** (a fcem do motor
+   não vence os diodos de corpo): motor solto de verdade.
+4. **A mola leva a borboleta ao batente mecânico de marcha lenta** — o carro
+   volta a se comportar como corpo a cabo "burro": marcha lenta fixa no ajuste
+   mecânico, dirigível normalmente.
+5. O DAC vai a 0 V = 0%, coerente com a saída mascarada (em idle já é 0%).
+
+O mesmo vale nos transientes: *brownout* do ESP32 solta os GPIOs (→ pull-downs
+→ ponte desabilitada) e o boot inicializa com EN em nível baixo antes de
+qualquer PWM (`hbridge::begin`); GPIO18/19/21 não são pinos de *strapping* com
+glitch alto no reset. Ligando, desligando ou morrendo no meio de um movimento,
+todo caminho termina em **ponte desabilitada + mola no repouso**.
 
 ## Conector do corpo de borboleta (referência)
 
