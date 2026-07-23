@@ -163,11 +163,13 @@ para diagnosticar e disparar a calibração manualmente (respeitando o idle).
 
 ## Página web (WiFi)
 
-No boot, havendo uma **rede local (STA)** configurada (SSID/senha), o ESP32 tenta
-conectar nela e a página fica acessível pelo IP que o roteador atribuir (veja no
-log serial a 115200). Sem rede configurada — ou se ela não conectar em ~15 s — o
-ESP sobe seu **próprio AP** (default: SSID `A3-TBC`, senha `a3tbc123` —
-**troque**) com a página em `http://192.168.4.1/`:
+No boot, havendo uma **rede local (STA)** configurada (SSID/senha), o ESP32
+tenta conectar nela e a página fica acessível por **`http://a3-tbc.local/`**
+(mDNS — funciona em Windows/macOS/iOS/Linux; navegadores Android costumam não
+resolver `.local`, use o IP que o roteador atribuir, visível no log serial a
+115200). Sem rede configurada — ou se ela não conectar em ~15 s — o ESP sobe
+seu **próprio AP** (default: SSID `A3-TBC`, senha `a3tbc123` — **troque**) com
+a página em `http://192.168.4.1/`:
 
 - **Monitor ao vivo** (~3 Hz): modo, falha, idle, setpoint, posição, duty
   aplicado, saída analógica, raw do TPS, duty/frequência do comando, termos
@@ -198,9 +200,30 @@ Projeto [PlatformIO](https://platformio.org/) (framework Arduino, board
 
 ```bash
 pio run              # compila
-pio run -t upload    # grava
+pio run -t upload    # grava via USB
 pio device monitor   # serial 115200
+pio run -e esp32dev_ota -t upload --upload-port a3-tbc.local   # grava pela rede (OTA)
 ```
+
+### Atualização OTA (pela rede)
+
+Dois caminhos, ambos só com o core (ArduinoOTA/Update):
+
+- **PlatformIO (espota)**: comando acima, em `a3-tbc.local` (mDNS) ou no IP do
+  ESP32 (log serial/roteador). Senha (`--auth` no `platformio.ini`) = senha do
+  AP (`apPass`) vigente no boot.
+- **Navegador**: card "Atualização de firmware (OTA)" na página — envie o
+  `.pio/build/esp32dev/firmware.bin`. Funciona também no AP do veículo (ex.:
+  pelo celular).
+
+Cuidados: atualizar **com o motor desligado** — ao iniciar a gravação a ponte H
+é desabilitada e o loop fica bloqueado até o fim da transferência; ao final o
+ESP32 reinicia (boot em estado seguro). Parâmetros e calibração ficam na NVS.
+
+> Gotcha: a gravação **USB** escreve sempre na partição `app0`, mas o OTA
+> alterna entre `app0`/`app1` via `otadata`. Se após usar OTA uma gravação USB
+> parecer "não pegar" (volta o firmware antigo), apague o `otadata`:
+> `esptool erase_region 0xe000 0x2000` — ou grave de novo por OTA.
 
 ## Estrutura do repositório
 
@@ -223,8 +246,9 @@ pio device monitor   # serial 115200
     ├── calibration.*    ← auto calibração + NVS + máx aprendido do TPS
     ├── analog_out.*     ← saída DAC 0–100%
     ├── control.*        ← máquina de modos, malha, failsafes, máscara
-    ├── webui.*          ← AP WiFi + rotas HTTP
-    └── webui_page.h     ← página (HTML/CSS/JS embutidos)
+    ├── webui.*          ← AP WiFi + rotas HTTP (inclui POST /update)
+    ├── webui_page.h     ← página (HTML/CSS/JS embutidos)
+    └── ota.*            ← gravação pela rede (espota/ArduinoOTA)
 ```
 
 ## Roadmap
@@ -237,6 +261,7 @@ pio device monitor   # serial 115200
 - [x] Malha PID + regra do idle switch + failsafes
 - [x] Saída analógica mascarada (DAC)
 - [x] WiFi AP + página web de debug/parametrização
+- [x] Atualização OTA (espota e upload pela página)
 - [ ] Compilação verificada com toolchain xtensa (`pio run`) e ajuste de warnings
 - [ ] Testes em bancada (motor + potenciômetro reais, sintonia do PID)
 - [ ] Testes no veículo

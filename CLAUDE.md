@@ -49,7 +49,8 @@ montado à mão).
 | `calibration` | Auto calibração (repouso/máx/mín) + NVS + máx aprendido do TPS |
 | `analog_out` | DAC (GPIO25) 0–100% → 0–3,3 V |
 | `control` | Máquina de modos, malha PID, failsafes, saída mascarada |
-| `webui` | AP WiFi + página de debug/parametrização |
+| `webui` | AP WiFi + página de debug/parametrização (inclui `POST /update`) |
+| `ota` | Gravação pela rede (espota/ArduinoOTA, senha = `apPass`) |
 
 ## Regras de segurança (invariantes)
 
@@ -67,6 +68,7 @@ montado à mão).
 
 ```bash
 pio run              # compila
-pio run -t upload    # grava
+pio run -t upload    # grava via USB
 pio device monitor   # serial 115200
+pio run -e esp32dev_ota -t upload --upload-port <IP>  # grava pela rede (OTA)
 ```
