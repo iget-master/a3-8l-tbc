@@ -5,6 +5,24 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.7.0] - 2026-07-23
+
+### Adicionado
+
+- **Atualização de firmware pela rede (OTA)**, só com bibliotecas do core:
+  - **espota/ArduinoOTA** (módulo `ota`, porta 3232):
+    `pio run -e esp32dev_ota -t upload --upload-port a3-tbc.local` — novo env
+    no `platformio.ini`; senha = senha do AP (`apPass`) vigente no boot.
+  - **mDNS**: o aparelho atende por **`http://a3-tbc.local/`** (página, API e
+    espota; serviço `_http._tcp` anunciado) — sem precisar saber o IP.
+    Navegadores Android costumam não resolver `.local` — usar o IP.
+  - **Upload pelo navegador**: card "Atualização de firmware (OTA)" na página
+    envia o `firmware.bin` para `POST /update` (funciona no AP do veículo).
+  - Segurança: ao iniciar a gravação a ponte H é desabilitada (a transferência
+    bloqueia o loop) e o task WDT é alimentado durante a escrita; ao final o
+    ESP32 reinicia no boot seguro. A tabela de partições padrão já tem
+    `app0`/`app1` + `otadata` — sem mudança de layout.
+
 ## [0.6.0] - 2026-07-21
 
 ### Adicionado
