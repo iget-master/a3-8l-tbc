@@ -179,6 +179,20 @@ sinal real.</p>
 </div>
 
 <div class="card">
+<h2>Atualização de firmware (OTA)</h2>
+<p class="warnbox">⚠ Atualize com o motor desligado. Durante o envio o motor fica
+solto e a página trava; ao final o ESP32 reinicia (boot em estado seguro).
+Parâmetros e calibração ficam preservados na NVS.</p>
+<div class="btnrow">
+<input type="file" id="fwFile" accept=".bin">
+<button type="button" id="btnFw">Enviar e reiniciar</button>
+<span id="fwMsg" class="msg"></span>
+</div>
+<p class="hint">Arquivo: .pio/build/esp32dev/firmware.bin — ou grave direto do
+PlatformIO: pio run -e esp32dev_ota -t upload --upload-port &lt;IP&gt;</p>
+</div>
+
+<div class="card">
 <h2>Ações</h2>
 <div class="btnrow">
 <button type="button" id="btnCal">Calibrar</button>
@@ -313,6 +327,17 @@ el('btnDef').addEventListener('click',function(){
 });
 el('btnFaultClr').addEventListener('click',function(){
   post('/api/faultclear').then(function(){flash('falha do motor limpa');});
+});
+el('btnFw').addEventListener('click',function(){
+  var f=el('fwFile').files[0];
+  if(!f){t('fwMsg','selecione o firmware.bin');return;}
+  if(!confirm('Gravar novo firmware e reiniciar o ESP32?'))return;
+  var fd=new FormData();fd.append('fw',f,'firmware.bin');
+  t('fwMsg','enviando… não feche a página');
+  fetch('/update',{method:'POST',body:fd})
+    .then(function(r){return r.text().then(function(x){return {ok:r.ok,txt:x};});})
+    .then(function(o){t('fwMsg',o.ok?'OK — reiniciando; recarregue em ~10 s':'FALHA: '+o.txt);})
+    .catch(function(){t('fwMsg','conexão caiu (provável reboot) — recarregue em ~10 s');});
 });
 loadParams();
 </script>

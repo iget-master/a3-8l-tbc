@@ -1,5 +1,6 @@
 #include "webui.h"
 
+#include <Update.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -25,6 +26,10 @@ NetState s_net = NetState::Ap;
 uint32_t s_staStartMs = 0;
 uint32_t s_lastLogMs = 0;
 constexpr uint32_t kStaConnectTimeoutMs = 15000;
+
+// Reboot adiado após OTA pela web: a resposta HTTP precisa escoar antes.
+bool s_rebootPending = false;
+uint32_t s_rebootAtMs = 0;
 
 template <typename T>
 T clampv(T v, T lo, T hi) {
@@ -272,6 +277,43 @@ void handleFaultClear() {
   sendOk();
 }
 
+// OTA pela página (POST /update, multipart). O handleClient síncrono bloqueia o
+// loop() durante toda a transferência: ponte desabilitada no início e task WDT
+// alimentado a cada bloco.
+void handleUpdateUpload() {
+  HTTPUpload& up = s_server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    hbridge::disable();
+    Serial.printf("[ota] web: recebendo \"%s\"\n", up.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    feedLoopWDT();
+    if (Update.isRunning() &&
+        Update.write(up.buf, up.currentSize) != up.currentSize) {
+      Update.printError(Serial);
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial.printf("[ota] web: %u bytes gravados\n", (unsigned)up.totalSize);
+    } else {
+      Update.printError(Serial);
+    }
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    Serial.println("[ota] web: upload abortado");
+  }
+}
+
+void handleUpdateDone() {
+  if (Update.hasError()) {
+    s_server.send(500, "text/plain", "falha na gravação — ver log serial");
+    return;
+  }
+  s_server.send(200, "text/plain", "OK");
+  s_rebootPending = true;
+  s_rebootAtMs = millis() + 600;
+}
+
 void handleDefaults() {
   const uint32_t oldFreq = settings::get().pwmFreqHz;
   settings::resetDefaults();
@@ -319,6 +361,7 @@ void begin() {
   s_server.on("/api/setpoint", HTTP_POST, handleSetpoint);
   s_server.on("/api/cal", HTTP_POST, handleCal);
   s_server.on("/api/faultclear", HTTP_POST, handleFaultClear);
+  s_server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   s_server.on("/api/defaults", HTTP_POST, handleDefaults);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "not found"); });
   s_server.begin();
@@ -326,6 +369,11 @@ void begin() {
 
 void loop() {
   s_server.handleClient();
+
+  if (s_rebootPending && (int32_t)(millis() - s_rebootAtMs) >= 0) {
+    Serial.println("[ota] web: reiniciando");
+    ESP.restart();
+  }
 
   if (s_net != NetState::Connecting) return;
 

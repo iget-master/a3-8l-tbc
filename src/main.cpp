@@ -5,6 +5,7 @@
 #include "control.h"
 #include "hbridge.h"
 #include "isense.h"
+#include "ota.h"
 #include "pins.h"
 #include "pwm_input.h"
 #include "settings.h"
@@ -51,6 +52,7 @@ void setup() {
   calibration::begin();
   control::begin();
   webui::begin();
+  ota::begin();  // depois do webui: WiFi já configurado
 
   pinMode(PIN_LED, OUTPUT);
 }
@@ -61,5 +63,6 @@ void loop() {
   pwm_input::poll();
   control::loop();
   webui::loop();
+  ota::handle();
   digitalWrite(PIN_LED, ledOn(millis()) ? HIGH : LOW);
 }
