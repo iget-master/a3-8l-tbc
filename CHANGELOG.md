@@ -5,6 +5,25 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.12.0] - 2026-07-26
+
+### Adicionado
+
+- **Auto-rastreio do repouso** (`restTrackEnabled`, padrão ligado): em idle +
+  motor em coast por ≥ 1 s (borboleta garantida no batente), EMA lenta
+  (τ ≈ 25 s) atualiza o repouso da calibração (pistas 1 e 2; mín acompanha
+  quando mín = repouso), limitada a ±80 counts da âncora da última calibração
+  completa e persistida na NVS com throttling e gravações ordenadas (mín ≤
+  repouso vale em qualquer ponto de queda). Corrige drift de
+  3V3/Vref/temperatura/desgaste sem hardware.
+
+### Alterado
+
+- **Auto-calibração deixa de rodar em todo boot**: roda a cada `calEveryBoots`
+  boots (padrão **10**; contador na NVS, zerado por calibração completa) ou
+  sempre que não houver calibração válida. Vez chegada sem idle disponível →
+  segue com a calibração salva e tenta no próximo boot.
+
 ## [0.11.0] - 2026-07-26
 
 ### Adicionado
