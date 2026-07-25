@@ -1,4 +1,4 @@
 #pragma once
 
 // Fonte da verdade da versão do firmware (SemVer). Manter CHANGELOG.md em dia.
-#define FW_VERSION "0.10.1"
+#define FW_VERSION "0.11.0"

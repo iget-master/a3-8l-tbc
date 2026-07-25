@@ -5,6 +5,22 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.11.0] - 2026-07-26
+
+### Adicionado
+
+- **Pista 2 do TPS (contraposta) com verificação cruzada** — opcional
+  (`tps2Enabled`, padrão desligado), no **GPIO36**: canal filtrado próprio
+  (mesma mediana+EMA), inversão independente (`tps2Invert`), calibração das
+  duas pistas na mesma rotina (NVS) e comparação em posição a cada ciclo —
+  divergência acima de `tps2DivergePct` (padrão 10%) sustentada → `Fault`
+  **"TPS divergente"** (mesmas persistências de queda/recuperação do TPS
+  implausível). Detecta trilha gasta/drift/curto que o limiar de
+  plausibilidade não enxerga. Pista 2 inválida na calibração desativa só a
+  verificação cruzada (controle segue na pista 1). Telemetria `rawTps2`/`pos2`
+  no status e no monitor da página; `docs/hardware.md` com a ligação
+  (cursor 2 → RC → GPIO36).
+
 ## [0.10.1] - 2026-07-26
 
 ### Corrigido
