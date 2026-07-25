@@ -58,4 +58,14 @@ float positionPct2(uint16_t rawValue);
 uint16_t learnedMaxRaw();
 void observeRaw(uint16_t rawValue, bool idleActive);  // aprende se outAutoLearnMax
 void maybePersistLearned();  // salva na NVS com throttling (>=60 s entre gravações)
+
+// Auto-calibração periódica: true quando o contador de boots (NVS) alcançou
+// calEveryBoots. Uma calibração completa bem-sucedida zera o contador.
+bool bootCalibrationDue();
+
+// Auto-rastreio do repouso: chamar a cada tick quando em idle + motor em coast
+// (borboleta garantida no batente). EMA lenta atualiza restRaw (e min/pista 2
+// quando aplicável), ancorada em ±80 counts do repouso de referência; persiste
+// na NVS com throttling.
+void trackRest();
 }

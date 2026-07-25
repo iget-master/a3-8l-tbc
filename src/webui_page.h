@@ -153,8 +153,13 @@ habilitar/mudar inversão.</p>
 <label class="f"><span>Faixa mínima (counts)</span><input id="calMinRangeCounts" type="number" step="1"></label>
 <label class="f"><span>Duty da calibração (%)</span><input id="calDrivePct" type="number" step="any"></label>
 <label class="f"><span>Medir fase de fechamento</span><input id="calMeasureClose" type="checkbox"></label>
+<label class="f"><span>Auto-cal a cada N boots (0=nunca)</span><input id="calEveryBoots" type="number" step="1" min="0" max="1000"></label>
+<label class="f"><span>Auto-rastreio do repouso</span><input id="restTrackEnabled" type="checkbox"></label>
 <p class="hint">Desmarcado (corpo 8L): mín = repouso — recolher o pino abriria o
-switch de idle e abortaria. Marque só se o atuador tiver curso abaixo do repouso.</p>
+switch de idle e abortaria. Marque só se o atuador tiver curso abaixo do repouso.
+Auto-cal periódica: calibra no boot a cada N boots (sempre que não houver
+calibração válida, calibra independente). Auto-rastreio: em idle+coast, EMA
+lenta (~25 s) corrige o repouso contra drift (±80 counts da âncora).</p>
 </fieldset>
 <fieldset><legend>Saída analógica</legend>
 <label class="f"><span>Mín (raw, 0 = auto)</span><input id="outMinRaw" type="number" step="1"></label>
@@ -229,8 +234,8 @@ var el=function(id){return document.getElementById(id);};
 var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
 var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','spSlewPctPerS','calDrivePct','tpsEmaAlpha','isMinDutyPct','tps2DivergePct'];
-var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
-var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','tps2Enabled','tps2Invert','calMeasureClose'];
+var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','calEveryBoots','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
+var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','tps2Enabled','tps2Invert','calMeasureClose','restTrackEnabled'];
 var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}

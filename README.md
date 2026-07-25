@@ -119,23 +119,36 @@ página web.
 
 ## Auto calibração
 
-Ao energizar o circuito, se o **switch de idle estiver acionado** (pedal solto),
-é executada uma rotina de auto calibração para encontrar os três pontos de
-referência do sensor de posição:
+A rotina roda no boot **a cada `calEveryBoots` boots** (default 10; contador na
+NVS, zerado por calibração completa) ou **sempre que não houver calibração
+válida** — nos demais boots valem os valores salvos. Precisa do **switch de
+idle acionado** (pedal solto); se a vez chegou e o idle não permite, o firmware
+segue com a calibração salva e tenta no próximo boot. Fases:
 
 1. **Repouso** — motor solto; aguarda a leitura estabilizar e registra.
 2. **Abertura máxima** — motor acionado (duty `calDrivePct`, default 100%) no
    sentido abrir; aguarda estabilizar no fim de curso e registra.
-3. **Abertura mínima** — idem no sentido fechar; registra.
+3. **Abertura mínima** — idem no sentido fechar (fase **pulada** com
+   `calMeasureClose` desligado — corpo 8L: mín = repouso); registra.
 4. Motor solto (borboleta volta ao repouso); valores validados
-   (mín < repouso < máx, faixa mínima configurável) e salvos na NVS.
+   (mín ≤ repouso < máx, faixa mínima de abertura configurável) e salvos na
+   NVS (pistas 1 e 2, quando habilitada).
 
 A rotina **aborta** (mantendo a última calibração válida da NVS) se: o pedal
 for acionado no meio, alguma fase não estabilizar dentro do timeout, ou a
-validação falhar. Se o idle não estiver acionado na energização, a calibração é
-pulada e valem os últimos valores salvos. **Sem nenhuma calibração válida o
-firmware entra em `Fault`** (motor desligado) — a página web continua ativa
-para diagnosticar e disparar a calibração manualmente (respeitando o idle).
+validação falhar — o motivo aparece na página e no serial. **Sem nenhuma
+calibração válida o firmware entra em `Fault`** (motor desligado) — a página
+web continua ativa para diagnosticar e disparar a calibração manualmente
+(respeitando o idle).
+
+### Auto-rastreio do repouso (entre calibrações)
+
+Com `restTrackEnabled` (default ligado): em **idle + motor em coast** por ≥ 1 s
+— situação em que a borboleta está garantidamente no batente — uma EMA lenta
+(τ ≈ 25 s) atualiza o ponto de repouso da calibração (pistas 1 e 2), limitada a
+**±80 counts** da âncora da última calibração completa. Corrige drift de
+3V3/Vref/temperatura/desgaste sem hardware extra, e é o que permite espaçar as
+calibrações completas (`calEveryBoots`). Persiste na NVS com throttling.
 
 ## Modos de operação
 

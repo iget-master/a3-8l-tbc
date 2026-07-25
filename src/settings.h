@@ -4,7 +4,7 @@
 // Parâmetros ajustáveis pela página web, persistidos na NVS (namespace "cfg").
 // Persistência por blob versionado: mudou o layout da struct → bump SETTINGS_VERSION
 // (a carga com versão diferente volta aos defaults).
-constexpr uint8_t SETTINGS_VERSION = 9;
+constexpr uint8_t SETTINGS_VERSION = 10;
 
 // Máx de amostras da mediana do TPS (janela ímpar); dimensiona o buffer no tps.
 constexpr uint8_t TPS_MEDIAN_MAX = 15;
@@ -103,6 +103,16 @@ struct Settings {
   uint32_t tps2Enabled = 0;
   uint32_t tps2Invert = 0;         // pista 2 também invertida? (independente da 1)
   float tps2DivergePct = 10.0f;    // |pos1 − pos2| acima disto (sustentado) → falha
+
+  // Auto-calibração periódica: roda a cada N boots (contador na NVS; 0 = só
+  // manual ou quando não houver calibração válida). Entre calibrações, o
+  // auto-rastreio do repouso corrige o drift da âncora.
+  uint32_t calEveryBoots = 10;
+
+  // Auto-rastreio do repouso: em idle + motor em coast (borboleta garantida no
+  // batente), uma EMA lenta (τ ≈ 25 s) atualiza o restRaw da calibração —
+  // corrige drift de 3V3/Vref/temperatura/desgaste sem hardware extra.
+  uint32_t restTrackEnabled = 1;
 };
 
 namespace settings {

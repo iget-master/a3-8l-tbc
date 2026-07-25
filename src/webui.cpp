@@ -158,7 +158,7 @@ void handleParamsGet() {
       "\"tps2DivergePct\":%.1f,"
       "\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
-      "\"calMeasureClose\":%s,"
+      "\"calMeasureClose\":%s,\"calEveryBoots\":%u,\"restTrackEnabled\":%s,"
       "\"outMinRaw\":%u,\"outMaxRaw\":%u,\"outAutoLearnMax\":%s,"
       "\"outBaseOnRelease\":%s,"
       "\"idleActiveLow\":%s,\"idleDebounceMs\":%u,"
@@ -178,6 +178,7 @@ void handleParamsGet() {
       (unsigned)s.calSettleMs, (unsigned)s.calStabilityCounts,
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
       (double)s.calDrivePct, b(s.calMeasureClose != 0),
+      (unsigned)s.calEveryBoots, b(s.restTrackEnabled != 0),
       (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
       b(s.outAutoLearnMax), b(s.outBaseOnRelease != 0),
       b(s.idleActiveLow), (unsigned)s.idleDebounceMs,
@@ -219,6 +220,8 @@ void handleParamsPost() {
   s.calMinRangeCounts = (uint16_t)argLong("calMinRangeCounts", s.calMinRangeCounts, 10, 4095);
   s.calDrivePct = argFloat("calDrivePct", s.calDrivePct, 10.0f, 100.0f);
   s.calMeasureClose = argBool("calMeasureClose", s.calMeasureClose != 0) ? 1u : 0u;
+  s.calEveryBoots = (uint32_t)argLong("calEveryBoots", (long)s.calEveryBoots, 0, 1000);
+  s.restTrackEnabled = argBool("restTrackEnabled", s.restTrackEnabled != 0) ? 1u : 0u;
   s.outMinRaw = (uint16_t)argLong("outMinRaw", s.outMinRaw, 0, 4095);
   s.outMaxRaw = (uint16_t)argLong("outMaxRaw", s.outMaxRaw, 0, 4095);
   s.outAutoLearnMax = argBool("outAutoLearnMax", s.outAutoLearnMax);

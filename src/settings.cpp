@@ -97,6 +97,8 @@ void sanitize(Settings& s) {
   if (s.tps2Enabled > 1) s.tps2Enabled = 1;
   if (s.tps2Invert > 1) s.tps2Invert = 1;
   s.tps2DivergePct = clampf(s.tps2DivergePct, 2.0f, 50.0f, def.tps2DivergePct);
+  s.calEveryBoots = clampv<uint32_t>(s.calEveryBoots, 0, 1000);
+  if (s.restTrackEnabled > 1) s.restTrackEnabled = 1;
 }
 
 }  // namespace

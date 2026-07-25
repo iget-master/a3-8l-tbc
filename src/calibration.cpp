@@ -20,6 +20,7 @@ constexpr const char* kKeyLearnedMax = "lmax";
 constexpr const char* kKeyRest2 = "rest2";
 constexpr const char* kKeyMin2 = "min2";
 constexpr const char* kKeyMax2 = "max2";
+constexpr const char* kKeyBootN = "bootn";
 
 constexpr uint32_t kSettleStartMs = 300;           // assentamento mecânico inicial
 constexpr uint16_t kLearnMarginCounts = 8;         // margem anti-ruído do máx aprendido
@@ -63,6 +64,35 @@ uint32_t s_winCount = 0;
 uint16_t s_learnedMax = 4095;
 uint16_t s_persistedLearned = 4095;
 uint32_t s_lastPersistMs = 0;
+
+// Contador de boots (auto-calibração periódica)
+uint16_t s_bootCount = 0;
+
+// Auto-rastreio do repouso: EMA em float (resolução sub-count), âncora da
+// última calibração completa e cópias persistidas (throttling próprio).
+constexpr float kRestTrackAlpha = 0.0002f;        // τ ≈ 25 s @ 200 Hz
+constexpr uint16_t kRestTrackMaxCounts = 80;      // desvio máx da âncora
+constexpr uint16_t kRestTrackStructMargin = 100;  // rest sempre < máx − margem
+constexpr uint16_t kRestPersistDeltaCounts = 8;
+constexpr uint32_t kRestPersistIntervalMs = 60000;
+float s_restTrackF = 0.0f;
+float s_rest2TrackF = 0.0f;
+uint16_t s_restAnchor = 0;
+uint16_t s_rest2Anchor = 0;
+uint16_t s_restPersisted = 0;
+uint16_t s_rest2Persisted = 0;
+uint32_t s_restPersistMs = 0;
+
+// (Re)inicializa o estado do rastreio a partir da calibração vigente.
+void initTrackState() {
+  s_restTrackF = (float)g_data.restRaw;
+  s_rest2TrackF = (float)g_data.rest2Raw;
+  s_restAnchor = g_data.restRaw;
+  s_rest2Anchor = g_data.rest2Raw;
+  s_restPersisted = g_data.restRaw;
+  s_rest2Persisted = g_data.rest2Raw;
+  s_restPersistMs = millis();
+}
 
 void resetStability() { s_winCount = 0; }
 
@@ -187,6 +217,16 @@ void finishPhase(const Settings& cfg) {
   persistData();
   s_persistedLearned = s_learnedMax;
   s_lastPersistMs = millis();
+  // Calibração completa zera o ciclo periódico e re-ancora o rastreio.
+  s_bootCount = 0;
+  {
+    Preferences prefs;
+    if (prefs.begin(kNamespace, /*readOnly=*/false)) {
+      prefs.putUShort(kKeyBootN, 0);
+      prefs.end();
+    }
+  }
+  initTrackState();
   s_state = State::Done;
   Serial.printf("[cal] OK: rep %u · mín %u · máx %u\n", (unsigned)g_data.restRaw,
                 (unsigned)g_data.minRaw, (unsigned)g_data.maxRaw);
@@ -213,6 +253,18 @@ void begin() {
   s_learnedMax = lm;
   s_persistedLearned = lm;
   s_lastPersistMs = millis();
+
+  // Contador de boots da auto-calibração periódica (incrementa a cada boot;
+  // zera numa calibração completa bem-sucedida).
+  Preferences prefs2;
+  if (prefs2.begin(kNamespace, /*readOnly=*/false)) {
+    s_bootCount = prefs2.getUShort(kKeyBootN, 0);
+    if (s_bootCount < 65535) s_bootCount++;
+    prefs2.putUShort(kKeyBootN, s_bootCount);
+    prefs2.end();
+  }
+
+  initTrackState();
 }
 
 bool start() {
@@ -230,6 +282,7 @@ void abortRun() {
   if (!running()) return;
   hbridge::disable();  // estado seguro: duty 0 + EN baixo
   loadDataFromNvs();   // volta à última calibração válida
+  initTrackState();    // rastreio re-ancora na calibração restaurada
   // Abortos internos preenchem o motivo antes; aqui só o caso externo.
   if (s_failReason[0] == '\0') {
     strlcpy(s_failReason, "abortada de fora (TPS implausível ou troca de modo)",
@@ -389,6 +442,84 @@ void maybePersistLearned() {
   prefs.end();
   s_persistedLearned = s_learnedMax;
   s_lastPersistMs = now;
+}
+
+bool bootCalibrationDue() {
+  const uint32_t n = settings::get().calEveryBoots;
+  return n > 0 && (uint32_t)s_bootCount >= n;
+}
+
+void trackRest() {
+  const Settings& cfg = settings::get();
+  if (!cfg.restTrackEnabled || !g_data.valid || running()) return;
+
+  // Pista 1: EMA lenta, presa à âncora (±80 counts da última calibração) e à
+  // estrutura (rest sempre bem abaixo do máx).
+  s_restTrackF += kRestTrackAlpha * ((float)tps::raw() - s_restTrackF);
+  {
+    int32_t v = (int32_t)(s_restTrackF + 0.5f);
+    const int32_t lo = (int32_t)s_restAnchor - kRestTrackMaxCounts;
+    const int32_t hi = (int32_t)s_restAnchor + kRestTrackMaxCounts;
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    const int32_t structHi = (int32_t)g_data.maxRaw - kRestTrackStructMargin;
+    if (v > structHi) v = structHi;
+    if (v < 0) v = 0;
+    const bool minLocked = g_data.minRaw >= g_data.restRaw;  // caso 8L: mín = rep
+    g_data.restRaw = (uint16_t)v;
+    if (minLocked) g_data.minRaw = g_data.restRaw;
+    else if (g_data.minRaw > g_data.restRaw) g_data.minRaw = g_data.restRaw;
+  }
+
+  // Pista 2 (quando em uso): mesmo tratamento, senão o rastreio da pista 1
+  // criaria offset artificial na verificação cruzada.
+  if (cfg.tps2Enabled && g_data.valid2) {
+    s_rest2TrackF += kRestTrackAlpha * ((float)tps::raw2() - s_rest2TrackF);
+    int32_t v = (int32_t)(s_rest2TrackF + 0.5f);
+    const int32_t lo = (int32_t)s_rest2Anchor - kRestTrackMaxCounts;
+    const int32_t hi = (int32_t)s_rest2Anchor + kRestTrackMaxCounts;
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    const int32_t structHi = (int32_t)g_data.max2Raw - kRestTrackStructMargin;
+    if (v > structHi) v = structHi;
+    if (v < 0) v = 0;
+    const bool minLocked = g_data.min2Raw >= g_data.rest2Raw;
+    g_data.rest2Raw = (uint16_t)v;
+    if (minLocked) g_data.min2Raw = g_data.rest2Raw;
+    else if (g_data.min2Raw > g_data.rest2Raw) g_data.min2Raw = g_data.rest2Raw;
+  }
+
+  // Persistência com throttling. Ordem das gravações preserva mín <= rep em
+  // qualquer ponto de queda (cada putUShort é atômico na NVS).
+  const uint32_t now = millis();
+  const uint16_t d1 = g_data.restRaw > s_restPersisted
+                          ? (uint16_t)(g_data.restRaw - s_restPersisted)
+                          : (uint16_t)(s_restPersisted - g_data.restRaw);
+  const uint16_t d2 = g_data.rest2Raw > s_rest2Persisted
+                          ? (uint16_t)(g_data.rest2Raw - s_rest2Persisted)
+                          : (uint16_t)(s_rest2Persisted - g_data.rest2Raw);
+  if (d1 < kRestPersistDeltaCounts && d2 < kRestPersistDeltaCounts) return;
+  if (now - s_restPersistMs < kRestPersistIntervalMs) return;
+  Preferences prefs;
+  if (!prefs.begin(kNamespace, /*readOnly=*/false)) return;
+  if (g_data.restRaw >= s_restPersisted) {  // subindo: rep primeiro, mín depois
+    prefs.putUShort(kKeyRest, g_data.restRaw);
+    prefs.putUShort(kKeyMin, g_data.minRaw);
+  } else {  // descendo: mín primeiro, rep depois
+    prefs.putUShort(kKeyMin, g_data.minRaw);
+    prefs.putUShort(kKeyRest, g_data.restRaw);
+  }
+  if (g_data.rest2Raw >= s_rest2Persisted) {
+    prefs.putUShort(kKeyRest2, g_data.rest2Raw);
+    prefs.putUShort(kKeyMin2, g_data.min2Raw);
+  } else {
+    prefs.putUShort(kKeyMin2, g_data.min2Raw);
+    prefs.putUShort(kKeyRest2, g_data.rest2Raw);
+  }
+  prefs.end();
+  s_restPersisted = g_data.restRaw;
+  s_rest2Persisted = g_data.rest2Raw;
+  s_restPersistMs = now;
 }
 
 }  // namespace calibration

@@ -44,6 +44,9 @@ uint16_t s_outBaseCandRaw = 0;  // candidato no flanco cru do switch
 uint16_t s_outBaseRaw = 0;      // confirmado pelo debounce
 constexpr uint16_t kOutBaseMinSpanCounts = 100;  // span mínimo até o máx
 
+// Auto-rastreio do repouso: tempo contínuo em idle+coast (borboleta assentada)
+uint32_t s_restCoastSinceMs = 0;
+
 // Agendamento da malha
 uint32_t s_lastTickMs = 0;
 uint32_t s_lastCycleUs = 0;
@@ -224,9 +227,20 @@ void runCycle(uint32_t now, float dt) {
   switch (s_mode) {
     case Mode::Boot:
       if (now - s_bootMs >= kBootSettleMs) {
-        if (idle && calibration::start()) s_mode = Mode::Calibrating;
-        else if (calibration::data().valid) enterNormal(now);
-        else setFault(kFaultNoCal);
+        // Auto-calibração só quando devida (contador de boots >= calEveryBoots)
+        // ou sem calibração válida; nos demais boots usa a da NVS direto — o
+        // auto-rastreio do repouso corrige o drift entre calibrações. Se está
+        // devida mas o idle não permite, segue normal e tenta no próximo boot
+        // (o contador não zera sem calibração completa).
+        const bool needCal =
+            !calibration::data().valid || calibration::bootCalibrationDue();
+        if (needCal && idle && calibration::start()) {
+          s_mode = Mode::Calibrating;
+        } else if (calibration::data().valid) {
+          enterNormal(now);
+        } else {
+          setFault(kFaultNoCal);
+        }
       }
       break;
 
@@ -311,6 +325,15 @@ void runCycle(uint32_t now, float dt) {
       break;
   }
 
+  // Auto-rastreio do repouso: só com a borboleta garantida no batente — Run,
+  // idle ativo, ponte em coast — e assentada há >= 1 s (a mola já parou).
+  if (s_mode == Mode::Run && idle && hbridge::appliedDuty() == 0.0f) {
+    if (s_restCoastSinceMs == 0) s_restCoastSinceMs = now;
+    else if (now - s_restCoastSinceMs >= 1000) calibration::trackRest();
+  } else {
+    s_restCoastSinceMs = 0;
+  }
+
   // Saída analógica mascarada — sempre atualizada
   float outPct = 0.0f;
   if (!idle) {
@@ -355,6 +378,7 @@ void begin() {
   s_spEffective = 0.0f;
   s_outBaseCandRaw = 0;
   s_outBaseRaw = 0;
+  s_restCoastSinceMs = 0;
   s_mode = Mode::Boot;
 }
 
