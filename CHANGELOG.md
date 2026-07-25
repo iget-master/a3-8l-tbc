@@ -5,6 +5,100 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.10.1] - 2026-07-26
+
+### Corrigido
+
+- **Vibração/ciclo-limite com setpoint fixo**: a zona morta era dura (erro
+  inteiro voltava de uma vez ao cruzar a borda — o P saltava a cada excursão
+  de ruído do TPS, com direito a excursões grandes ocasionais). Agora é
+  **subtrativa (suave)**: fora da banda conta só o excedente do erro, contínuo
+  na borda.
+
+## [0.10.0] - 2026-07-26
+
+### Adicionado
+
+- **Saída analógica com zero rebaseado na soltura do idle**
+  (`outBaseOnRelease`, padrão ligado): 0% = posição da borboleta no instante em
+  que o pedal assume (capturada no flanco cru do switch e confirmada pelo
+  debounce) — a posição do atuador não vaza mais para o sinal (antes: soltar
+  com o atuador estendido partia de ~24%). 100% continua fixo no máx
+  aprendido/WOT. Sem span útil até o máx, ou antes da primeira soltura, vale a
+  régua fixa antiga (mín da calibração).
+
+## [0.9.1] - 2026-07-25
+
+### Corrigido
+
+- **Caçada ao voltar do pedal para idle com setpoint alto**: a transição
+  DriverActive → Run reengatava o PID de uma vez com o erro inteiro (chute de
+  duty com a borboleta ainda em movimento). Agora o reengate é suave: PID
+  zerado e rampa do setpoint partindo da posição atual.
+
+## [0.9.0] - 2026-07-25
+
+### Adicionado
+
+- **Rampa do setpoint** (`spSlewPctPerS`, %/s; padrão 250; 0 = desligada):
+  limita a variação do setpoint que o PID segue — retorno rápido ao repouso
+  vira descida controlada (sem pancada no batente nem o quique que o PID
+  caçava). Engate suave: ao entrar em modo normal a rampa parte da posição
+  atual. A telemetria (`setpoint`) mostra o valor pós-rampa.
+
+### Alterado
+
+- Página: **barra de posição/setpoint fixa no topo** (sticky — sempre visível
+  ao rolar); sliders do modo manual e do setpoint de bancada agora **só
+  positivos** (0..+100) — coerente com o corpo do 8L, sem faixa abaixo do
+  repouso.
+
+## [0.8.3] - 2026-07-25
+
+### Corrigido
+
+- **Calibração abortando na fase de fechamento** no corpo do 8L: o switch de
+  idle fecha pelo contato alavanca↔pino do atuador — recolher o pino
+  (drive negativo) descola a alavanca, o switch abre e a rotina abortava com
+  "idle solto". Novo parâmetro `calMeasureClose` (padrão **desligado**): a
+  fase de fechamento é pulada e `mín = repouso`. Marcar apenas em hardware com
+  curso real abaixo do repouso.
+
+## [0.8.2] - 2026-07-24
+
+### Adicionado
+
+- **Motivo da falha da calibração**: cada caminho de reprovação registra o
+  porquê com os valores medidos (faixa insuficiente com rep/máx/Δ, timeout de
+  estabilidade com a banda vigente, idle solto na fase X, aborto externo) —
+  visível na página (linha "Calibração (raw)"), no `/api/status`
+  (`cal.fail`) e no log serial (fases e candidatos também são logados).
+
+## [0.8.1] - 2026-07-24
+
+### Corrigido
+
+- **Calibração em corpo cujo repouso da mola é o batente fechado** (caso do
+  8L): a validação exigia `mín < repouso` — uma faixa abaixo do repouso que
+  esse hardware não tem — e reprovava sempre. Agora aceita mín = repouso
+  (clampa a diferença de ruído) e exige a faixa mínima só do lado da abertura.
+  Motor com fios trocados continua sendo reprovado (a "abertura" não sai do
+  repouso).
+- Com calibração de mín = repouso, **setpoints negativos viram pedido de
+  repouso** (coast) — o PID não fica estolando o motor contra o batente
+  fechado.
+
+## [0.8.0] - 2026-07-24
+
+### Adicionado
+
+- **Suporte a TPS com pista invertida** (tensão maior fechado, caso do sensor
+  real do corpo): novo parâmetro "Sinal invertido" (`tpsInvert`) espelha a
+  leitura na fonte (`4095 − raw`) — calibração, PID, saída analógica, máximo
+  aprendido e plausibilidade funcionam sem mudança. Recalibrar após alterar.
+  Sem o flag, a calibração de um TPS invertido reprova na validação
+  (`mín < repouso < máx`) e restaura a calibração anterior da NVS.
+
 ## [0.7.0] - 2026-07-23
 
 ### Adicionado
