@@ -112,7 +112,8 @@ void handleStatus() {
       buf, sizeof(buf),
       "{\"ver\":\"%s\",\"uptimeMs\":%lu,\"mode\":\"%s\",\"fault\":\"%s\","
       "\"idle\":%s,\"setpoint\":%.2f,\"pos\":%.2f,\"duty\":%.2f,"
-      "\"analogOut\":%.2f,\"rawTps\":%u,\"cmdDuty\":%.2f,\"cmdFreq\":%.1f,"
+      "\"analogOut\":%.2f,\"rawTps\":%u,\"rawTps2\":%u,\"pos2\":%.2f,"
+      "\"cmdDuty\":%.2f,\"cmdFreq\":%.1f,"
       "\"cmdPresent\":%s,\"pidP\":%.2f,\"pidI\":%.2f,\"pidD\":%.2f,"
       "\"manual\":%s,\"spOvr\":%s,\"mCur\":%u,\"mCurEst\":%.0f,\"stall\":%s,"
       "\"mLatch\":%s,\"cal\":{\"state\":\"%s\",\"fail\":\"%s\",\"rest\":%u,"
@@ -121,7 +122,8 @@ void handleStatus() {
       control::faultReason(), b(control::idleActive()),
       (double)control::setpointPct(), (double)control::positionPct(),
       (double)control::appliedDutyPct(), (double)control::analogOutPct(),
-      (unsigned)tps::raw(), (double)pwm_input::dutyPct(),
+      (unsigned)tps::raw(), (unsigned)tps::raw2(), (double)control::pos2Pct(),
+      (double)pwm_input::dutyPct(),
       (double)pwm_input::freqHz(), b(pwm_input::signalPresent()),
       (double)control::pidP(), (double)control::pidI(),
       (double)control::pidD(), b(control::manualActive()),
@@ -152,7 +154,8 @@ void handleParamsGet() {
       "\"maxDutyPct\":%.2f,\"spSlewPctPerS\":%.1f,\"loopHz\":%u,\"cmdTimeoutMs\":%u,"
       "\"cmdStuckHighIs100\":%s,\"pwmFreqHz\":%lu,\"tpsFaultLowRaw\":%u,"
       "\"tpsFaultHighRaw\":%u,\"tpsEmaAlpha\":%.3f,\"tpsMedianSamples\":%u,"
-      "\"tpsInvert\":%s,"
+      "\"tpsInvert\":%s,\"tps2Enabled\":%s,\"tps2Invert\":%s,"
+      "\"tps2DivergePct\":%.1f,"
       "\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
       "\"calMeasureClose\":%s,"
@@ -170,7 +173,8 @@ void handleParamsGet() {
       b(s.cmdStuckHighIs100), (unsigned long)s.pwmFreqHz,
       (unsigned)s.tpsFaultLowRaw, (unsigned)s.tpsFaultHighRaw,
       (double)s.tpsEmaAlpha, (unsigned)s.tpsMedianSamples,
-      b(s.tpsInvert != 0),
+      b(s.tpsInvert != 0), b(s.tps2Enabled != 0), b(s.tps2Invert != 0),
+      (double)s.tps2DivergePct,
       (unsigned)s.calSettleMs, (unsigned)s.calStabilityCounts,
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
       (double)s.calDrivePct, b(s.calMeasureClose != 0),
@@ -206,6 +210,9 @@ void handleParamsPost() {
   s.tpsMedianSamples =
       (uint8_t)argLong("tpsMedianSamples", s.tpsMedianSamples, 1, TPS_MEDIAN_MAX);
   s.tpsInvert = argBool("tpsInvert", s.tpsInvert != 0) ? 1u : 0u;
+  s.tps2Enabled = argBool("tps2Enabled", s.tps2Enabled != 0) ? 1u : 0u;
+  s.tps2Invert = argBool("tps2Invert", s.tps2Invert != 0) ? 1u : 0u;
+  s.tps2DivergePct = argFloat("tps2DivergePct", s.tps2DivergePct, 2.0f, 50.0f);
   s.calSettleMs = (uint16_t)argLong("calSettleMs", s.calSettleMs, 50, 10000);
   s.calStabilityCounts = (uint16_t)argLong("calStabilityCounts", s.calStabilityCounts, 1, 1000);
   s.calTimeoutMs = (uint32_t)argLong("calTimeoutMs", s.calTimeoutMs, 500, 60000);

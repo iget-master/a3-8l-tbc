@@ -22,6 +22,7 @@ constexpr uint32_t kManualTimeoutMs = 3000; // keepalive do modo manual
 constexpr uint32_t kSpOverrideTimeoutMs = 3000; // keepalive do override de setpoint
 
 constexpr const char* kFaultTps = "TPS implausível";
+constexpr const char* kFaultTpsDiverge = "TPS divergente (pistas 1×2)";
 constexpr const char* kFaultNoCal = "sem calibração";
 constexpr const char* kFaultMotorShort = "curto no motor";
 constexpr const char* kFaultMotorOpen = "motor desconectado";
@@ -70,6 +71,7 @@ float s_spEffective = 0.0f;
 // Telemetria
 float s_setpointPct = 0.0f;
 float s_positionPct = 0.0f;
+float s_pos2Pct = 0.0f;  // posição pela pista 2 (0 se desabilitada/inválida)
 float s_analogOutPct = 0.0f;
 
 bool readIdleRaw() {
@@ -93,11 +95,13 @@ void updateIdleDebounce(uint32_t now) {
   }
 }
 
-void updateTpsWatch(uint32_t now) {
-  const bool plaus = tps::plausible();
-  if (plaus != s_tpsPlaus) {
-    s_tpsPlaus = plaus;
-    if (plaus) s_tpsGoodSinceMs = now;
+// ok = plausibilidade da pista 1 E coerência com a pista 2 (quando habilitada):
+// as duas classes de falha de sensor compartilham as persistências de
+// queda/recuperação.
+void updateTpsWatch(uint32_t now, bool ok) {
+  if (ok != s_tpsPlaus) {
+    s_tpsPlaus = ok;
+    if (ok) s_tpsGoodSinceMs = now;
     else s_tpsBadSinceMs = now;
   }
 }
@@ -139,10 +143,24 @@ void runCycle(uint32_t now, float dt) {
   const Settings& cfg = settings::get();
   const bool idle = s_idleStable;
 
-  updateTpsWatch(now);
-
   // Telemetria base, válida em qualquer modo.
   s_positionPct = calibration::positionPct(tps::raw());
+
+  // Verificação cruzada da pista 2 (opcional): as posições das duas pistas
+  // têm que bater — divergência sustentada é falha de sensor tão grave quanto
+  // implausibilidade (trilha gasta/drift que o limiar não vê).
+  bool sensorOk = tps::plausible();
+  s_pos2Pct = 0.0f;
+  {
+    const calibration::Data& cd = calibration::data();
+    if (cfg.tps2Enabled && cd.valid2) {
+      s_pos2Pct = calibration::positionPct2(tps::raw2());
+      if (fabsf(s_pos2Pct - s_positionPct) > cfg.tps2DivergePct) {
+        sensorOk = false;
+      }
+    }
+  }
+  updateTpsWatch(now, sensorOk);
 
   // Setpoint: normalmente do PWM de comando (0/50/100% → −100/0/+100). Na
   // bancada (sem gerador de PWM) um override pela web injeta o setpoint e conta
@@ -185,7 +203,7 @@ void runCycle(uint32_t now, float dt) {
   // testar o motor sem sensor (a saída dele não depende do TPS).
   if (s_mode != Mode::Boot && s_mode != Mode::Fault && s_mode != Mode::Manual &&
       tpsBadPersistent(now)) {
-    setFault(kFaultTps);
+    setFault(tps::plausible() ? kFaultTpsDiverge : kFaultTps);
   }
 
   // Corrente da ponte: curto/desconexão derrubam qualquer modo que acione o
@@ -275,8 +293,11 @@ void runCycle(uint32_t now, float dt) {
     case Mode::Fault:
       hbridge::disable();  // garante estado seguro a cada ciclo
       if (s_motorFaultLatched) break;  // retida: só sai por clearMotorFault()
-      if (tpsBadPersistent(now)) s_faultReason = kFaultTps;
-      else if (!calibration::data().valid) s_faultReason = kFaultNoCal;
+      if (tpsBadPersistent(now)) {
+        s_faultReason = tps::plausible() ? kFaultTpsDiverge : kFaultTps;
+      } else if (!calibration::data().valid) {
+        s_faultReason = kFaultNoCal;
+      }
       if (tpsRecovered(now) && calibration::data().valid) enterNormal(now);
       break;
 
@@ -376,6 +397,7 @@ const char* faultReason() {
 
 float setpointPct() { return s_setpointPct; }
 float positionPct() { return s_positionPct; }
+float pos2Pct() { return s_pos2Pct; }
 float appliedDutyPct() { return hbridge::appliedDuty(); }
 float analogOutPct() { return s_analogOutPct; }
 bool idleActive() { return s_idleStable; }

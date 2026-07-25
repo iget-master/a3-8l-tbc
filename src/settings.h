@@ -4,7 +4,7 @@
 // Parâmetros ajustáveis pela página web, persistidos na NVS (namespace "cfg").
 // Persistência por blob versionado: mudou o layout da struct → bump SETTINGS_VERSION
 // (a carga com versão diferente volta aos defaults).
-constexpr uint8_t SETTINGS_VERSION = 8;
+constexpr uint8_t SETTINGS_VERSION = 9;
 
 // Máx de amostras da mediana do TPS (janela ímpar); dimensiona o buffer no tps.
 constexpr uint8_t TPS_MEDIAN_MAX = 15;
@@ -95,6 +95,14 @@ struct Settings {
   // vaza pro sinal); 100% continua fixo no máx aprendido/WOT. Desligado = a
   // régua fixa antiga (mín da calibração). uint32_t pela regra da migração.
   uint32_t outBaseOnRelease = 1;
+
+  // TPS pista 2 (contraposta, PIN_TPS2) — verificação cruzada opcional: as
+  // posições das duas pistas têm que bater; divergência sustentada → Fault
+  // ("TPS divergente"). Pega falha de trilha gasta/drift que o limiar de
+  // plausibilidade não vê. Recalibrar após habilitar/mudar a inversão.
+  uint32_t tps2Enabled = 0;
+  uint32_t tps2Invert = 0;         // pista 2 também invertida? (independente da 1)
+  float tps2DivergePct = 10.0f;    // |pos1 − pos2| acima disto (sustentado) → falha
 };
 
 namespace settings {

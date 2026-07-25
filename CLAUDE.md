@@ -41,7 +41,7 @@ montado à mão).
 |---|---|
 | `pins.h` | Pinout (espelho de `docs/hardware.md`) |
 | `settings` | Parâmetros ajustáveis persistidos na NVS |
-| `tps` | Leitura filtrada do potenciômetro de posição (ADC1) |
+| `tps` | Leitura filtrada do potenciômetro de posição (ADC1) — pistas 1 e 2 (verificação cruzada opcional) |
 | `pwm_input` | Medição do duty do sinal PWM de comando (ISR) |
 | `hbridge` | Ponte H via LEDC — duty com sinal (abre/fecha/coast) |
 | `isense` | Corrente da ponte (IS do IBT-2) — fim de curso e falha de motor |

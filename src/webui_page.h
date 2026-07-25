@@ -71,6 +71,7 @@ button.danger{background:var(--err);color:#fff}
 <div class="stat"><div class="l">Duty aplicado</div><div class="v" id="sDuty">–</div></div>
 <div class="stat"><div class="l">Saída analógica</div><div class="v" id="sAout">–</div></div>
 <div class="stat"><div class="l">TPS (raw)</div><div class="v" id="sRaw">–</div></div>
+<div class="stat"><div class="l">TPS 2 (raw / pos)</div><div class="v" id="sRaw2">–</div></div>
 <div class="stat"><div class="l">Comando PWM</div><div class="v" id="sCmd">–</div></div>
 <div class="stat"><div class="l">Manual</div><div class="v" id="sManual">–</div></div>
 <div class="stat"><div class="l">Corrente ponte (raw)</div><div class="v" id="sCur">–</div></div>
@@ -136,9 +137,14 @@ sinal real.</p>
 <label class="f"><span>Filtro EMA α (0–1)</span><input id="tpsEmaAlpha" type="number" step="any"></label>
 <label class="f"><span>Mediana (ímpar, 1–15)</span><input id="tpsMedianSamples" type="number" step="2" min="1" max="15"></label>
 <label class="f"><span>Sinal invertido</span><input id="tpsInvert" type="checkbox"></label>
+<label class="f"><span>Pista 2 (verif. cruzada)</span><input id="tps2Enabled" type="checkbox"></label>
+<label class="f"><span>Pista 2 invertida</span><input id="tps2Invert" type="checkbox"></label>
+<label class="f"><span>Divergência máx (%)</span><input id="tps2DivergePct" type="number" step="any"></label>
 <p class="hint">α menor = mais suave, porém mais lag. Mediana maior = mata mais spikes.
 Sinal invertido: p/ TPS com tensão maior fechado — espelha a leitura (4095−raw);
-recalibrar após mudar.</p>
+recalibrar após mudar. Pista 2 (GPIO36): as posições das duas pistas têm que
+bater — divergência sustentada → FALHA "TPS divergente". Recalibrar após
+habilitar/mudar inversão.</p>
 </fieldset>
 <fieldset><legend>Calibração</legend>
 <label class="f"><span>Estabilização (ms)</span><input id="calSettleMs" type="number" step="1"></label>
@@ -222,9 +228,9 @@ atuador até os fins de curso.</p>
 var el=function(id){return document.getElementById(id);};
 var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
-var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','spSlewPctPerS','calDrivePct','tpsEmaAlpha','isMinDutyPct'];
+var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','spSlewPctPerS','calDrivePct','tpsEmaAlpha','isMinDutyPct','tps2DivergePct'];
 var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
-var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','calMeasureClose'];
+var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','tps2Enabled','tps2Invert','calMeasureClose'];
 var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}
@@ -247,6 +253,7 @@ function render(s){
   t('sDuty',s.duty.toFixed(1)+' %');
   t('sAout',s.analogOut.toFixed(1)+' %');
   t('sRaw',s.rawTps);
+  t('sRaw2',s.rawTps2+' ('+s.pos2.toFixed(1)+'%)');
   t('sCmd',s.cmdPresent?s.cmdDuty.toFixed(1)+' % @ '+s.cmdFreq.toFixed(0)+' Hz':'ausente');
   t('sManual',s.manual?'ATIVO':'—');
   el('sManual').className='v'+(s.manual?' warn':'');

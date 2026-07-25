@@ -17,6 +17,9 @@ constexpr const char* kKeyMin = "min";
 constexpr const char* kKeyMax = "max";
 constexpr const char* kKeyValid = "valid";
 constexpr const char* kKeyLearnedMax = "lmax";
+constexpr const char* kKeyRest2 = "rest2";
+constexpr const char* kKeyMin2 = "min2";
+constexpr const char* kKeyMax2 = "max2";
 
 constexpr uint32_t kSettleStartMs = 300;           // assentamento mecânico inicial
 constexpr uint16_t kLearnMarginCounts = 8;         // margem anti-ruído do máx aprendido
@@ -43,6 +46,11 @@ uint32_t s_phaseStartMs = 0;
 uint16_t s_candRest = 0;
 uint16_t s_candMin = 0;
 uint16_t s_candMax = 0;
+// Pista 2: capturada no fechamento de cada fase (a borboleta está parada e o
+// filtro assentado — dispensa janela de estabilidade própria).
+uint16_t s_candRest2 = 0;
+uint16_t s_candMin2 = 0;
+uint16_t s_candMax2 = 0;
 
 // Janela de estabilidade: recomeça sempre que a leitura sai da banda; estável
 // quando uma mesma janela sobrevive calSettleMs contínuos.
@@ -96,6 +104,13 @@ bool structurallyValid(const Data& d) {
   return d.minRaw <= d.restRaw && d.restRaw < d.maxRaw;
 }
 
+// Pista 2 segue a mesma regra estrutural (no domínio já espelhado por
+// tps2Invert). Inversão mal configurada → máx2 < rep2 → inválida: só a
+// verificação cruzada desativa, o controle segue na pista 1.
+bool structurallyValid2(const Data& d) {
+  return d.min2Raw <= d.rest2Raw && d.rest2Raw < d.max2Raw;
+}
+
 void loadDataFromNvs() {
   Data d;
   Preferences prefs;
@@ -104,8 +119,14 @@ void loadDataFromNvs() {
     d.minRaw = prefs.getUShort(kKeyMin, 0);
     d.maxRaw = prefs.getUShort(kKeyMax, 0);
     d.valid = prefs.getBool(kKeyValid, false);
+    d.rest2Raw = prefs.getUShort(kKeyRest2, 0);
+    d.min2Raw = prefs.getUShort(kKeyMin2, 0);
+    d.max2Raw = prefs.getUShort(kKeyMax2, 0);
     prefs.end();
   }
+  // Pista 2 só vale junto com uma calibração principal válida (chaves ausentes
+  // viram 0 → estruturalmente inválida → verificação cruzada desativada).
+  d.valid2 = d.valid && structurallyValid2(d);
   g_data = (d.valid && structurallyValid(d)) ? d : Data{};
 }
 
@@ -117,6 +138,9 @@ void persistData() {
   prefs.putUShort(kKeyRest, g_data.restRaw);
   prefs.putUShort(kKeyMin, g_data.minRaw);
   prefs.putUShort(kKeyMax, g_data.maxRaw);
+  prefs.putUShort(kKeyRest2, g_data.rest2Raw);
+  prefs.putUShort(kKeyMin2, g_data.min2Raw);
+  prefs.putUShort(kKeyMax2, g_data.max2Raw);
   prefs.putUShort(kKeyLearnedMax, s_learnedMax);
   prefs.putBool(kKeyValid, true);
   prefs.end();
@@ -141,6 +165,20 @@ void finishPhase(const Settings& cfg) {
   g_data.minRaw = s_candMin;
   g_data.maxRaw = s_candMax;
   g_data.valid = true;
+  // Pista 2: melhor esforço — só quando habilitada; inválida não reprova a
+  // rotina, apenas desativa a verificação cruzada.
+  if (settings::get().tps2Enabled) {
+    if (s_candMin2 > s_candRest2) s_candMin2 = s_candRest2;
+    g_data.rest2Raw = s_candRest2;
+    g_data.min2Raw = s_candMin2;
+    g_data.max2Raw = s_candMax2;
+  } else {
+    g_data.rest2Raw = g_data.min2Raw = g_data.max2Raw = 0;
+  }
+  g_data.valid2 = structurallyValid2(g_data);
+  if (settings::get().tps2Enabled && !g_data.valid2) {
+    Serial.println("[cal] pista 2 inválida (checar tps2Invert/fiação) — verificação cruzada OFF");
+  }
   // Reconcilia o máx aprendido com a nova calibração: nunca abaixo do máx
   // calibrado; acima da faixa plausível = fallback/lixo antigo → re-baseia.
   if (s_learnedMax < g_data.maxRaw || s_learnedMax > cfg.tpsFaultHighRaw) {
@@ -181,6 +219,7 @@ bool start() {
   if (running()) return false;
   hbridge::disable();  // coast: mola leva ao repouso durante o assentamento
   s_candRest = s_candMin = s_candMax = 0;
+  s_candRest2 = s_candMin2 = s_candMax2 = 0;
   s_failReason[0] = '\0';
   Serial.printf("[cal] início (raw=%u)\n", (unsigned)tps::raw());
   enterPhase(State::SettleStart, millis());
@@ -230,12 +269,14 @@ void run(bool idleActive) {
         const uint16_t avg = stabilityAverage();
         if (s_state == State::Rest) {
           s_candRest = avg;
+          s_candRest2 = tps::raw2();  // pista 2: snapshot com a borboleta parada
           Serial.printf("[cal] repouso=%u → abrindo\n", (unsigned)avg);
           hbridge::enable();
           hbridge::drive(cfg.calDrivePct);
           enterPhase(State::OpenMax, now);
         } else if (s_state == State::OpenMax) {
           s_candMax = avg;
+          s_candMax2 = tps::raw2();
           if (cfg.calMeasureClose) {
             Serial.printf("[cal] máx=%u → fechando\n", (unsigned)avg);
             hbridge::drive(-cfg.calDrivePct);
@@ -244,6 +285,7 @@ void run(bool idleActive) {
             // Corpo sem curso abaixo do repouso (8L): recolher o pino
             // descolaria a alavanca e abriria o switch de idle — pula a fase.
             s_candMin = s_candRest;
+            s_candMin2 = s_candRest2;
             Serial.printf("[cal] máx=%u → sem fase de fechamento (mín=rep)\n",
                           (unsigned)avg);
             hbridge::disable();  // motor solto: mola leva ao repouso
@@ -251,6 +293,7 @@ void run(bool idleActive) {
           }
         } else {
           s_candMin = avg;
+          s_candMin2 = tps::raw2();
           Serial.printf("[cal] mín=%u → validando\n", (unsigned)avg);
           hbridge::disable();  // motor solto: borboleta volta ao repouso
           enterPhase(State::Finish, now);
@@ -308,6 +351,17 @@ float positionPct(uint16_t rawValue) {
   if (span <= 0) return 0.0f;
   const float pct = 100.0f * (float)(raw - rest) / (float)span;
   // Satura em ±100%: leitura além do máx/mín calibrado não extrapola a faixa.
+  return pct > 100.0f ? 100.0f : (pct < -100.0f ? -100.0f : pct);
+}
+
+float positionPct2(uint16_t rawValue) {
+  if (!g_data.valid2) return 0.0f;
+  const int32_t raw = rawValue;
+  const int32_t rest = g_data.rest2Raw;
+  const int32_t span = raw >= rest ? (int32_t)g_data.max2Raw - rest
+                                   : rest - (int32_t)g_data.min2Raw;
+  if (span <= 0) return 0.0f;
+  const float pct = 100.0f * (float)(raw - rest) / (float)span;
   return pct > 100.0f ? 100.0f : (pct < -100.0f ? -100.0f : pct);
 }
 

@@ -34,6 +34,7 @@ const char* faultReason();  // "" quando sem falha
 // Telemetria para a web
 float setpointPct();      // −100..+100 (0 = repouso)
 float positionPct();      // normalizada pela calibração (pode sair de ±100)
+float pos2Pct();          // posição pela pista 2 (0 se desabilitada/inválida)
 float appliedDutyPct();
 float analogOutPct();     // valor mascarado enviado ao DAC
 bool idleActive();        // já com debounce

@@ -94,6 +94,9 @@ void sanitize(Settings& s) {
   if (s.calMeasureClose > 1) s.calMeasureClose = 1;
   s.spSlewPctPerS = clampf(s.spSlewPctPerS, 0.0f, 20000.0f, def.spSlewPctPerS);
   if (s.outBaseOnRelease > 1) s.outBaseOnRelease = 1;
+  if (s.tps2Enabled > 1) s.tps2Enabled = 1;
+  if (s.tps2Invert > 1) s.tps2Invert = 1;
+  s.tps2DivergePct = clampf(s.tps2DivergePct, 2.0f, 50.0f, def.tps2DivergePct);
 }
 
 }  // namespace

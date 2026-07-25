@@ -18,6 +18,7 @@ Placa alvo: **ESP32 DevKit V1 (30 pinos, módulo WROOM-32)**.
 | Função | GPIO | Tipo | Observações |
 |---|---|---|---|
 | TPS (potenciômetro de posição) | **GPIO34** | Entrada analógica (ADC1_CH6) | Somente entrada; alimentar o potenciômetro com **3,3 V** do próprio ESP32 para usar a faixa completa do ADC sem divisor |
+| TPS pista 2 — contraposta (opcional) | **GPIO36** | Entrada analógica (ADC1_CH0) | Somente entrada; verificação cruzada das pistas (ver seção TPS) |
 | Sinal PWM de comando (alvo %) | **GPIO35** | Entrada digital (somente entrada) | Passar por condicionamento de nível (ver abaixo) antes de chegar ao pino |
 | Switch de idle | **GPIO32** | Entrada digital com pull-up interno | Switch fechando para **GND** quando pedal solto (em idle → nível baixo) |
 | Ponte H — IN1 (sentido **abrir**) | **GPIO18** | Saída PWM (LEDC) | |
@@ -27,7 +28,8 @@ Placa alvo: **ESP32 DevKit V1 (30 pinos, módulo WROOM-32)**.
 | Saída analógica de posição 0–100% | **GPIO25** | Saída DAC (DAC1) | 0–3,3 V; usar buffer/amplificador se o consumidor esperar 0–5 V (ver abaixo) |
 | LED de status | **GPIO2** | Saída | LED onboard do DevKit (heartbeat / erro / calibrando) |
 
-Pinos livres para expansão futura: GPIO16, 17, 22, 23, 26 (DAC2), 27.
+Pinos livres para expansão futura: GPIO16, 17, 22, 23, 26 (DAC2), 27 e 39
+(VN — somente entrada, sem pulls).
 
 ## Diagrama de ligação
 
@@ -42,7 +44,7 @@ Pinos livres para expansão futura: GPIO16, 17, 22, 23, 26 (DAC2), 27.
    TPS GND ◄───────────┤ GND  GPIO19 ────┼─────────►│ LPWM (IN2) │   └───────────────┘
                        │      GPIO21 ────┼─────────►│ R_EN+L_EN  │
                        │      GPIO33 ◄───┼─[680Ω+RC]┤ R_IS+L_IS  │
-                       │                 │          └─────┬──────┘
+   TPS2 cursor ───────►│ GPIO36          │          └─────┬──────┘
    Saída 0–100% ◄──[buffer]── GPIO25     │                │ VMOT = 12 V pós-chave
                        │                 │                │ (fusível + TVS — ver Alimentação)
                        └─────────────────┘
@@ -148,6 +150,30 @@ o switch ficou neste pino: **GPIO34–39 não têm pull-up/pull-down internos**.
 - **Pista invertida** (tensão maior fechado — comum nesses TPS de duplo
   elemento): marcar **"Sinal invertido"** nos parâmetros da página — o firmware
   espelha a leitura (4095 − raw). Recalibrar após alterar.
+
+#### Pista 2 contraposta → GPIO36 (opcional — verificação cruzada)
+
+O TPS destes corpos tem **duas pistas contrapostas** (uma cresce abrindo, a
+outra decresce). Ligando a segunda, o firmware compara as posições das duas a
+cada ciclo: divergência sustentada (trilha gasta, drift, curto — falhas que o
+limiar de plausibilidade **não** enxerga, inclusive na região de marcha lenta,
+onde a trilha mais desgasta) → **Fault "TPS divergente"**, motor solto.
+
+- Ligação: **somente o cursor da pista 2 → série 1 kΩ → GPIO36**, com 100 nF do
+  pino para GND (mesmo RC da pista 1). As extremidades de alimentação são as
+  mesmas já ligadas (3V3/GND) — não inverter fisicamente; a polaridade se
+  ajusta por software (`tps2Invert`).
+- Antes de habilitar: medir com multímetro a tensão do cursor 2 fechado e todo
+  aberto (na mão). Se a tensão **cresce** ao abrir, deixar "Pista 2 invertida"
+  desmarcada; se decresce, marcar. Algumas peças têm a pista 2 com faixa
+  parcial/meia inclinação — sem problema: a comparação é feita em **posição
+  calibrada**, não em tensão.
+- Na página: marcar "Pista 2 (verif. cruzada)" e **recalibrar** (a rotina
+  registra as duas pistas juntas). Pista 2 estruturalmente inválida na
+  calibração (inversão errada, fio solto) desativa só a verificação cruzada —
+  o controle segue normal na pista 1.
+- GPIO36 (e o 39) têm glitches esporádicos de ADC com WiFi ativo — a mediana
+  do filtro do TPS já os absorve.
 - Resistor de série de 1 kΩ e capacitor de 100 nF do pino para GND (filtro
   anti-aliasing/ruído).
 - No firmware: média/mediana de várias amostras + atenuação `ADC_11db`.

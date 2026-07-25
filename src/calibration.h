@@ -26,6 +26,13 @@ struct Data {
   uint16_t minRaw = 0;
   uint16_t maxRaw = 0;
   bool valid = false;
+  // Pista 2 (contraposta, opcional): registrada na mesma rotina quando
+  // tps2Enabled. valid2 é independente — inválida desativa só a verificação
+  // cruzada, sem afetar o controle (que segue na pista 1).
+  uint16_t rest2Raw = 0;
+  uint16_t min2Raw = 0;
+  uint16_t max2Raw = 0;
+  bool valid2 = false;
 };
 
 void begin();               // carrega calibração e máx aprendido da NVS
@@ -43,6 +50,9 @@ const Data& data();
 // abaixo e acima do repouso (o repouso raramente é o centro geométrico).
 // Satura em ±100%: leitura além do máx/mín calibrado não extrapola a faixa.
 float positionPct(uint16_t rawValue);
+
+// Idem, pela calibração da pista 2 (0.0 se valid2 == false).
+float positionPct2(uint16_t rawValue);
 
 // Máximo do TPS aprendido fora de idle (usado no mapeamento da saída analógica).
 uint16_t learnedMaxRaw();

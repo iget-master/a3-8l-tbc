@@ -9,6 +9,7 @@
 namespace tps {
 void begin();
 void poll();          // uma amostra por chamada; chamar a cada loop()
-uint16_t raw();       // 0..4095 filtrado
-bool plausible();     // dentro de [tpsFaultLowRaw, tpsFaultHighRaw]
+uint16_t raw();       // pista 1: 0..4095 filtrado (espelhado se tpsInvert)
+uint16_t raw2();      // pista 2 (PIN_TPS2): filtrado (espelhado se tps2Invert)
+bool plausible();     // pista 1 dentro de [tpsFaultLowRaw, tpsFaultHighRaw]
 }

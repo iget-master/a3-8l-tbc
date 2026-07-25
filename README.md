@@ -153,6 +153,11 @@ para diagnosticar e disparar a calibração manualmente (respeitando o idle).
 - TPS fora da faixa plausível por >100 ms → `Fault` (motor desligado, mola leva
   ao repouso). Recupera sozinho após 500 ms de leitura plausível (se houver
   calibração válida).
+- **Pista 2 do TPS (opcional — `tps2Enabled`, GPIO36)**: as posições das duas
+  pistas contrapostas são comparadas a cada ciclo; divergência acima de
+  `tps2DivergePct` sustentada → `Fault` "TPS divergente" (mesmas persistências
+  do item acima). Pega falha de trilha gasta/drift que o limiar não vê — a
+  calibração registra as duas pistas na mesma rotina.
 - **Perda do sinal PWM de comando** (timeout sem bordas, default 250 ms) →
   **motor solto (coast)**: a mola leva a borboleta ao repouso. Sinal preso em
   nível alto pode, opcionalmente (`cmdStuckHighIs100`, default ligado), valer
@@ -185,7 +190,8 @@ a página em `http://192.168.4.1/`:
 - **Parâmetros** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta, limite de
   duty, frequência da malha e do PWM da ponte, timeout/semântica do sinal de
   comando, faixa de plausibilidade, filtro (α da EMA e nº de amostras da
-  mediana) e sinal invertido do TPS, parâmetros da calibração, mapeamento
+  mediana), sinal invertido e pista 2 (verificação cruzada) do TPS, parâmetros
+  da calibração, mapeamento
   da saída analógica, idle switch, SSID/senha do AP próprio e da rede local
   (STA) (valem após reiniciar).
 - **Ações**: disparar calibração, restaurar padrões, modo manual de bancada e
