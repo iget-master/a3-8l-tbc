@@ -37,6 +37,12 @@ bool s_idleRaw = false;
 bool s_idleStable = false;
 uint32_t s_idleChangeMs = 0;
 
+// Base da saída analógica: TPS no instante da soltura do idle (0 = nunca
+// capturada nesta sessão → mapeamento fixo até a primeira soltura).
+uint16_t s_outBaseCandRaw = 0;  // candidato no flanco cru do switch
+uint16_t s_outBaseRaw = 0;      // confirmado pelo debounce
+constexpr uint16_t kOutBaseMinSpanCounts = 100;  // span mínimo até o máx
+
 // Agendamento da malha
 uint32_t s_lastTickMs = 0;
 uint32_t s_lastCycleUs = 0;
@@ -58,6 +64,9 @@ bool s_spOverride = false;
 float s_spOverrideValue = 0.0f;
 uint32_t s_spOverrideKickMs = 0;
 
+// Setpoint efetivo (pós-rampa) — o que o PID segue e a telemetria mostra.
+float s_spEffective = 0.0f;
+
 // Telemetria
 float s_setpointPct = 0.0f;
 float s_positionPct = 0.0f;
@@ -73,10 +82,14 @@ void updateIdleDebounce(uint32_t now) {
   if (raw != s_idleRaw) {
     s_idleRaw = raw;
     s_idleChangeMs = now;
+    // Flanco cru de soltura: captura o TPS AGORA (o pedal assumiu aqui; no
+    // fim do debounce a borboleta já andou). Só vale se o debounce confirmar.
+    if (!raw) s_outBaseCandRaw = tps::raw();
   }
   if (raw != s_idleStable &&
       now - s_idleChangeMs >= settings::get().idleDebounceMs) {
     s_idleStable = raw;
+    if (!raw) s_outBaseRaw = s_outBaseCandRaw;  // soltura confirmada
   }
 }
 
@@ -110,6 +123,7 @@ void setFault(const char* reason) {
 void enterNormal(uint32_t now) {
   hbridge::disable();
   s_pid.reset();
+  s_spEffective = s_positionPct;  // engate suave: rampa parte de onde está
   if (tpsBadPersistent(now)) {
     setFault(kFaultTps);
     return;
@@ -137,10 +151,34 @@ void runCycle(uint32_t now, float dt) {
       s_spOverride && now - s_spOverrideKickMs < kSpOverrideTimeoutMs;
   if (!spOvr) s_spOverride = false;
   const bool cmdPresent = spOvr || pwm_input::signalPresent();
-  s_setpointPct = spOvr ? s_spOverrideValue
-                        : (pwm_input::signalPresent()
-                               ? 2.0f * pwm_input::dutyPct() - 100.0f
-                               : 0.0f);
+  float spTarget = spOvr ? s_spOverrideValue
+                         : (pwm_input::signalPresent()
+                                ? 2.0f * pwm_input::dutyPct() - 100.0f
+                                : 0.0f);
+
+  // Corpo sem faixa abaixo do repouso (mín == repouso, calibrado assim):
+  // pedido negativo vira pedido de repouso — senão o PID estolaria o motor
+  // contra o batente tentando fechar o que a mola já fechou.
+  {
+    const calibration::Data& cd = calibration::data();
+    if (cd.valid && cd.minRaw >= cd.restRaw && spTarget < 0.0f) {
+      spTarget = 0.0f;
+    }
+  }
+
+  // Rampa do setpoint: transição rápida vira descida/subida controlada — sem
+  // pancada no batente (nem o quique que o PID caçaria) ao voltar ao repouso.
+  const float slew = cfg.spSlewPctPerS;
+  if (slew > 0.0f && dt > 0.0f) {
+    const float maxStep = slew * dt;
+    const float delta = spTarget - s_spEffective;
+    if (delta > maxStep) s_spEffective += maxStep;
+    else if (delta < -maxStep) s_spEffective -= maxStep;
+    else s_spEffective = spTarget;
+  } else {
+    s_spEffective = spTarget;
+  }
+  s_setpointPct = s_spEffective;
 
   // TPS implausível derruba qualquer modo — exceto Boot, Fault e Manual:
   // o modo manual de bancada opera em malha aberta e serve justamente para
@@ -207,10 +245,14 @@ void runCycle(uint32_t now, float dt) {
       s_pid.setGains(cfg.kp, cfg.ki, cfg.kd);
       s_pid.setOutputLimit(cfg.maxDutyPct);
       const float err = s_setpointPct - s_positionPct;
-      // Zona morta: dentro dela o erro vale zero (setpoint = medição)
-      const float sp =
-          fabsf(err) <= cfg.deadbandPct ? s_positionPct : s_setpointPct;
-      const float out = s_pid.update(sp, s_positionPct, dt);
+      // Zona morta SUAVE (subtrativa): dentro dela o erro efetivo é zero;
+      // fora, conta só o excedente — contínuo na borda. A versão dura (erro
+      // inteiro ao cruzar a borda) fazia o P saltar a cada excursão de ruído
+      // do TPS: ciclo-limite vibrando o setpoint fixo.
+      float errEff = 0.0f;
+      if (err > cfg.deadbandPct) errEff = err - cfg.deadbandPct;
+      else if (err < -cfg.deadbandPct) errEff = err + cfg.deadbandPct;
+      const float out = s_pid.update(s_positionPct + errEff, s_positionPct, dt);
       hbridge::enable();
       hbridge::drive(out);
       break;
@@ -218,7 +260,13 @@ void runCycle(uint32_t now, float dt) {
 
     case Mode::DriverActive:
       if (idle) {
-        s_mode = Mode::Run;  // re-enable acontece no handler do Run
+        // Reengate suave: PID zerado e rampa partindo da posição atual —
+        // sem isto, pedal voltando com setpoint alto reengata com erro
+        // gigante de uma vez (chute de duty + caçada com a planta ainda
+        // em movimento). O re-enable acontece no handler do Run.
+        s_pid.reset();
+        s_spEffective = s_positionPct;
+        s_mode = Mode::Run;
         break;
       }
       calibration::observeRaw(tps::raw(), false);
@@ -246,10 +294,17 @@ void runCycle(uint32_t now, float dt) {
   float outPct = 0.0f;
   if (!idle) {
     const uint16_t raw = tps::raw();
-    const uint16_t mn =
+    uint16_t mn =
         cfg.outMinRaw != 0 ? cfg.outMinRaw : calibration::data().minRaw;
     const uint16_t mx =
         cfg.outMaxRaw != 0 ? cfg.outMaxRaw : calibration::learnedMaxRaw();
+    // Rebase dinâmico: 0% = posição na soltura do idle (a posição do atuador
+    // não vaza pro sinal); 100% segue fixo em mx. Sem span útil até o máx
+    // (soltura quase no WOT) ou sem captura ainda → régua fixa.
+    if (cfg.outBaseOnRelease && s_outBaseRaw != 0 &&
+        (int32_t)mx - (int32_t)s_outBaseRaw >= (int32_t)kOutBaseMinSpanCounts) {
+      mn = s_outBaseRaw;
+    }
     if (mx > mn) {
       outPct = constrain(100.0f * ((float)raw - (float)mn) / (float)(mx - mn),
                          0.0f, 100.0f);
@@ -276,6 +331,9 @@ void begin() {
   s_tpsGoodSinceMs = now;
   s_faultReason = "";
   s_motorFaultLatched = false;
+  s_spEffective = 0.0f;
+  s_outBaseCandRaw = 0;
+  s_outBaseRaw = 0;
   s_mode = Mode::Boot;
 }
 

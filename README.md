@@ -45,6 +45,10 @@ pontos da calibração:
   (o repouso quase nunca é o centro geométrico do curso).
 - Leituras do TPS **além** do máx/mín calibrado **saturam em ±100%** (não
   extrapolam a faixa) — vale para a telemetria e para a medição do PID.
+- **Corpo cujo repouso da mola é o próprio batente fechado** (caso do 8L): não
+  há faixa abaixo do repouso — a calibração aceita mín = repouso e **setpoints
+  negativos são tratados como pedido de repouso** (coast; o PID não estola o
+  motor contra o batente).
 
 O duty do PWM de comando (0–100%) mapeia linearmente nessa escala:
 **0% de duty → −100 (fechar todo), 50% → 0 (repouso), 100% → +100 (abrir
@@ -98,11 +102,15 @@ A saída no DAC (0–3,3 V) indica a posição da borboleta em 0–100%, com má
 | Em idle (switch de idle acionado / pedal solto) | **0%** |
 | Fora de idle (motorista acelerando) | Posição do TPS normalizada pela **faixa da saída** (abaixo) |
 
-A **faixa da saída** é própria (não é a faixa do atuador): vai de `outMinRaw` a
-`outMaxRaw`. Com os defaults (`0` = automático), o mínimo é o da calibração e o
-máximo é o **máximo aprendido**: o firmware observa o maior valor plausível do
-TPS visto fora de idle (pedal fundo → WOT), persiste na NVS (com proteção
-contra desgaste da flash) e usa esse valor como fundo de escala. Assim a
+O **zero da régua é rebaseado a cada soltura do idle** (`outBaseOnRelease`,
+padrão ligado): no flanco de soltura o firmware captura a posição da borboleta
+— 0% = ponto em que o pedal assumiu, esteja o atuador onde estiver (a posição
+da marcha lenta não "vaza" para o sinal). O **topo é fixo**: `outMaxRaw` ou o
+**máximo aprendido** — o firmware observa o maior valor plausível do TPS visto
+fora de idle (pedal fundo → WOT), persiste na NVS (com proteção contra
+desgaste da flash) e usa esse valor como fundo de escala. Com
+`outBaseOnRelease` desligado, vale a régua fixa antiga: de `outMinRaw` (ou o
+mín da calibração) ao topo. Assim a
 atuação da marcha lenta fica invisível para quem consome o sinal, e fora de
 idle a escala cobre o curso todo do pedal. Uma calibração bem-sucedida
 re-baseia o aprendido se ele estiver incoerente (abaixo do máximo calibrado ou
@@ -176,8 +184,8 @@ a página em `http://192.168.4.1/`:
   P/I/D, estado e valores da calibração, versão/uptime.
 - **Parâmetros** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta, limite de
   duty, frequência da malha e do PWM da ponte, timeout/semântica do sinal de
-  comando, faixa de plausibilidade e filtro (α da EMA e nº de amostras da mediana) do
-  TPS, parâmetros da calibração, mapeamento
+  comando, faixa de plausibilidade, filtro (α da EMA e nº de amostras da
+  mediana) e sinal invertido do TPS, parâmetros da calibração, mapeamento
   da saída analógica, idle switch, SSID/senha do AP próprio e da rede local
   (STA) (valem após reiniciar).
 - **Ações**: disparar calibração, restaurar padrões, modo manual de bancada e

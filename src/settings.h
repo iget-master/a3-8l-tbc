@@ -4,7 +4,7 @@
 // Parâmetros ajustáveis pela página web, persistidos na NVS (namespace "cfg").
 // Persistência por blob versionado: mudou o layout da struct → bump SETTINGS_VERSION
 // (a carga com versão diferente volta aos defaults).
-constexpr uint8_t SETTINGS_VERSION = 4;
+constexpr uint8_t SETTINGS_VERSION = 8;
 
 // Máx de amostras da mediana do TPS (janela ímpar); dimensiona o buffer no tps.
 constexpr uint8_t TPS_MEDIAN_MAX = 15;
@@ -72,6 +72,29 @@ struct Settings {
   uint16_t isOpenMs = 300;
   uint16_t isStallMs = 80;
   bool isenseEnabled = false;  // sem o circuito ligado o pino flutua → padrão OFF
+
+  // TPS com pista invertida (tensão maior fechado): 1 = espelha a leitura
+  // (4095 − raw) na fonte — todo o resto do firmware enxerga raw crescendo ao
+  // abrir. uint32_t (e não bool) para respeitar a regra da migração: o bloco
+  // anexado começa em campo de 4 bytes.
+  uint32_t tpsInvert = 0;
+
+  // Calibração: medir a fase de fechamento (drive −calDrivePct)? No corpo do
+  // 8L o repouso é o batente fechado E recolher o pino descola a alavanca,
+  // abrindo o switch de idle — a fase não mede nada e aborta a rotina. Padrão
+  // desligado: mín = repouso. uint32_t pela regra da migração (campo de 4 B).
+  uint32_t calMeasureClose = 0;
+
+  // Rampa do setpoint (%/s; 0 = desligada): limita a variação do setpoint que
+  // o PID segue. Evita a pancada no batente (e o quique que o PID caça) em
+  // retornos rápidos ao repouso.
+  float spSlewPctPerS = 250.0f;
+
+  // Saída analógica: rebase dinâmico do zero na soltura do idle — 0% = posição
+  // da borboleta no instante em que o pedal assume (a posição do atuador não
+  // vaza pro sinal); 100% continua fixo no máx aprendido/WOT. Desligado = a
+  // régua fixa antiga (mín da calibração). uint32_t pela regra da migração.
+  uint32_t outBaseOnRelease = 1;
 };
 
 namespace settings {

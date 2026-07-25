@@ -145,6 +145,9 @@ o switch ficou neste pino: **GPIO34–39 não têm pull-up/pull-down internos**.
 
 - Alimentar as extremidades do potenciômetro com **3V3 e GND do ESP32** — assim
   o cursor entrega 0–3,3 V direto ao ADC, sem divisor.
+- **Pista invertida** (tensão maior fechado — comum nesses TPS de duplo
+  elemento): marcar **"Sinal invertido"** nos parâmetros da página — o firmware
+  espelha a leitura (4095 − raw). Recalibrar após alterar.
 - Resistor de série de 1 kΩ e capacitor de 100 nF do pino para GND (filtro
   anti-aliasing/ruído).
 - No firmware: média/mediana de várias amostras + atenuação `ADC_11db`.

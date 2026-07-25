@@ -115,8 +115,8 @@ void handleStatus() {
       "\"analogOut\":%.2f,\"rawTps\":%u,\"cmdDuty\":%.2f,\"cmdFreq\":%.1f,"
       "\"cmdPresent\":%s,\"pidP\":%.2f,\"pidI\":%.2f,\"pidD\":%.2f,"
       "\"manual\":%s,\"spOvr\":%s,\"mCur\":%u,\"mCurEst\":%.0f,\"stall\":%s,"
-      "\"mLatch\":%s,\"cal\":{\"state\":\"%s\",\"rest\":%u,\"min\":%u,"
-      "\"max\":%u,\"valid\":%s,\"learnedMax\":%u}}",
+      "\"mLatch\":%s,\"cal\":{\"state\":\"%s\",\"fail\":\"%s\",\"rest\":%u,"
+      "\"min\":%u,\"max\":%u,\"valid\":%s,\"learnedMax\":%u}}",
       FW_VERSION, (unsigned long)millis(), control::modeName(),
       control::faultReason(), b(control::idleActive()),
       (double)control::setpointPct(), (double)control::positionPct(),
@@ -128,7 +128,8 @@ void handleStatus() {
       b(control::setpointOverrideActive()), (unsigned)isense::raw(),
       (double)isense::estRaw100(), b(isense::stalled()),
       b(control::motorFaultLatched()),
-      calibration::stateName(), (unsigned)cal.restRaw, (unsigned)cal.minRaw,
+      calibration::stateName(), calibration::failReason(),
+      (unsigned)cal.restRaw, (unsigned)cal.minRaw,
       (unsigned)cal.maxRaw, b(cal.valid),
       (unsigned)calibration::learnedMaxRaw());
   sendJsonOrOverflow(buf, n, sizeof(buf));
@@ -148,12 +149,15 @@ void handleParamsGet() {
   const int n = snprintf(
       buf, sizeof(buf),
       "{\"kp\":%.3f,\"ki\":%.3f,\"kd\":%.3f,\"deadbandPct\":%.2f,"
-      "\"maxDutyPct\":%.2f,\"loopHz\":%u,\"cmdTimeoutMs\":%u,"
+      "\"maxDutyPct\":%.2f,\"spSlewPctPerS\":%.1f,\"loopHz\":%u,\"cmdTimeoutMs\":%u,"
       "\"cmdStuckHighIs100\":%s,\"pwmFreqHz\":%lu,\"tpsFaultLowRaw\":%u,"
       "\"tpsFaultHighRaw\":%u,\"tpsEmaAlpha\":%.3f,\"tpsMedianSamples\":%u,"
+      "\"tpsInvert\":%s,"
       "\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
+      "\"calMeasureClose\":%s,"
       "\"outMinRaw\":%u,\"outMaxRaw\":%u,\"outAutoLearnMax\":%s,"
+      "\"outBaseOnRelease\":%s,"
       "\"idleActiveLow\":%s,\"idleDebounceMs\":%u,"
       "\"isenseEnabled\":%s,\"isMinDutyPct\":%.1f,\"isShortRaw\":%u,"
       "\"isOpenRaw\":%u,\"isStallRaw\":%u,\"isShortMs\":%u,\"isOpenMs\":%u,"
@@ -161,14 +165,18 @@ void handleParamsGet() {
       "\"apSsid\":\"%s\",\"apPass\":\"%s\","
       "\"staSsid\":\"%s\",\"staPass\":\"%s\"}",
       (double)s.kp, (double)s.ki, (double)s.kd, (double)s.deadbandPct,
-      (double)s.maxDutyPct, (unsigned)s.loopHz, (unsigned)s.cmdTimeoutMs,
+      (double)s.maxDutyPct, (double)s.spSlewPctPerS, (unsigned)s.loopHz,
+      (unsigned)s.cmdTimeoutMs,
       b(s.cmdStuckHighIs100), (unsigned long)s.pwmFreqHz,
       (unsigned)s.tpsFaultLowRaw, (unsigned)s.tpsFaultHighRaw,
       (double)s.tpsEmaAlpha, (unsigned)s.tpsMedianSamples,
+      b(s.tpsInvert != 0),
       (unsigned)s.calSettleMs, (unsigned)s.calStabilityCounts,
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
-      (double)s.calDrivePct, (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
-      b(s.outAutoLearnMax), b(s.idleActiveLow), (unsigned)s.idleDebounceMs,
+      (double)s.calDrivePct, b(s.calMeasureClose != 0),
+      (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
+      b(s.outAutoLearnMax), b(s.outBaseOnRelease != 0),
+      b(s.idleActiveLow), (unsigned)s.idleDebounceMs,
       b(s.isenseEnabled), (double)s.isMinDutyPct, (unsigned)s.isShortRaw,
       (unsigned)s.isOpenRaw, (unsigned)s.isStallRaw, (unsigned)s.isShortMs,
       (unsigned)s.isOpenMs, (unsigned)s.isStallMs,
@@ -187,6 +195,7 @@ void handleParamsPost() {
   s.kd = argFloat("kd", s.kd, 0.0f, 100.0f);
   s.deadbandPct = argFloat("deadbandPct", s.deadbandPct, 0.0f, 20.0f);
   s.maxDutyPct = argFloat("maxDutyPct", s.maxDutyPct, 0.0f, 100.0f);
+  s.spSlewPctPerS = argFloat("spSlewPctPerS", s.spSlewPctPerS, 0.0f, 20000.0f);
   s.loopHz = (uint16_t)argLong("loopHz", s.loopHz, 20, 1000);
   s.cmdTimeoutMs = (uint16_t)argLong("cmdTimeoutMs", s.cmdTimeoutMs, 20, 10000);
   s.cmdStuckHighIs100 = argBool("cmdStuckHighIs100", s.cmdStuckHighIs100);
@@ -196,14 +205,18 @@ void handleParamsPost() {
   s.tpsEmaAlpha = argFloat("tpsEmaAlpha", s.tpsEmaAlpha, 0.01f, 1.0f);
   s.tpsMedianSamples =
       (uint8_t)argLong("tpsMedianSamples", s.tpsMedianSamples, 1, TPS_MEDIAN_MAX);
+  s.tpsInvert = argBool("tpsInvert", s.tpsInvert != 0) ? 1u : 0u;
   s.calSettleMs = (uint16_t)argLong("calSettleMs", s.calSettleMs, 50, 10000);
   s.calStabilityCounts = (uint16_t)argLong("calStabilityCounts", s.calStabilityCounts, 1, 1000);
   s.calTimeoutMs = (uint32_t)argLong("calTimeoutMs", s.calTimeoutMs, 500, 60000);
   s.calMinRangeCounts = (uint16_t)argLong("calMinRangeCounts", s.calMinRangeCounts, 10, 4095);
   s.calDrivePct = argFloat("calDrivePct", s.calDrivePct, 10.0f, 100.0f);
+  s.calMeasureClose = argBool("calMeasureClose", s.calMeasureClose != 0) ? 1u : 0u;
   s.outMinRaw = (uint16_t)argLong("outMinRaw", s.outMinRaw, 0, 4095);
   s.outMaxRaw = (uint16_t)argLong("outMaxRaw", s.outMaxRaw, 0, 4095);
   s.outAutoLearnMax = argBool("outAutoLearnMax", s.outAutoLearnMax);
+  s.outBaseOnRelease =
+      argBool("outBaseOnRelease", s.outBaseOnRelease != 0) ? 1u : 0u;
   s.idleActiveLow = argBool("idleActiveLow", s.idleActiveLow);
   s.idleDebounceMs = (uint16_t)argLong("idleDebounceMs", s.idleDebounceMs, 0, 500);
   s.isenseEnabled = argBool("isenseEnabled", s.isenseEnabled);

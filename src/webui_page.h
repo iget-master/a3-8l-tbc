@@ -49,10 +49,16 @@ button{background:var(--acc);border:0;border-radius:6px;color:#04121f;padding:8p
 button.danger{background:var(--err);color:#fff}
 .btnrow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .msg{color:var(--ok);font-size:13px}
+#topbar{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0 6px;border-bottom:1px solid var(--edge)}
 </style>
 </head>
 <body>
 <h1>A3-8L TBC <span id="conn" class="badge">sem conexão</span></h1>
+
+<div id="topbar">
+<div class="bar"><div class="zero"></div><div id="barPos"></div><div id="barSp"></div></div>
+<div class="leg"><span>−100%</span><span class="p">■ posição</span><span class="s">▌ setpoint</span><span>0 = repouso (centro)</span><span style="margin-left:auto">+100%</span></div>
+</div>
 
 <div class="card">
 <h2>Monitor</h2>
@@ -75,8 +81,6 @@ button.danger{background:var(--err);color:#fff}
 <div class="stat"><div class="l">Versão</div><div class="v" id="sVer">–</div></div>
 <div class="stat"><div class="l">Uptime</div><div class="v" id="sUptime">–</div></div>
 </div>
-<div class="bar"><div class="zero"></div><div id="barPos"></div><div id="barSp"></div></div>
-<div class="leg"><span>−100%</span><span class="p">■ posição</span><span class="s">▌ setpoint</span><span>0 = repouso (centro)</span><span style="margin-left:auto">+100%</span></div>
 </div>
 
 <div class="card">
@@ -86,10 +90,10 @@ direto à ponte H, sem PID e sem a trava do pedal. Sem keepalive (aba fechada ou
 travada) o firmware desliga o motor em 3 s.</p>
 <label class="chk"><input type="checkbox" id="manOn"> ligar modo manual</label>
 <div class="manrow">
-<input type="range" id="manDuty" min="-100" max="100" step="1" value="0" disabled>
+<input type="range" id="manDuty" min="0" max="100" step="1" value="0" disabled>
 <b id="manVal">0 %</b>
 </div>
-<p class="hint">−100% = fechar todo · 0 = coast (mola leva ao repouso) · +100% = abrir todo</p>
+<p class="hint">0 = coast (mola leva ao repouso) · +100% = abrir todo</p>
 </div>
 
 <div class="card">
@@ -100,10 +104,10 @@ calibração válida). Sem keepalive (aba fechada/travada) expira em 3 s e volta
 sinal real.</p>
 <label class="chk"><input type="checkbox" id="spOn"> injetar setpoint</label>
 <div class="manrow">
-<input type="range" id="spVal" min="-100" max="100" step="1" value="0" disabled>
+<input type="range" id="spVal" min="0" max="100" step="1" value="0" disabled>
 <b id="spValLbl">0 %</b>
 </div>
-<p class="hint">−100% = mínimo · 0 = repouso · +100% = máximo. O PID atua no motor até a posição bater com o setpoint.</p>
+<p class="hint">0 = repouso · +100% = máximo. O PID atua no motor até a posição bater com o setpoint.</p>
 </div>
 
 <div class="card">
@@ -117,6 +121,7 @@ sinal real.</p>
 <label class="f"><span>Zona morta (%)</span><input id="deadbandPct" type="number" step="any"></label>
 <label class="f"><span>Duty máx (%)</span><input id="maxDutyPct" type="number" step="any"></label>
 <label class="f"><span>Malha (Hz)</span><input id="loopHz" type="number" step="1"></label>
+<label class="f"><span>Rampa setpoint (%/s, 0=desl.)</span><input id="spSlewPctPerS" type="number" step="any"></label>
 </fieldset>
 <fieldset><legend>Comando</legend>
 <label class="f"><span>Timeout (ms)</span><input id="cmdTimeoutMs" type="number" step="1"></label>
@@ -130,7 +135,10 @@ sinal real.</p>
 <label class="f"><span>Falha acima de (raw)</span><input id="tpsFaultHighRaw" type="number" step="1"></label>
 <label class="f"><span>Filtro EMA α (0–1)</span><input id="tpsEmaAlpha" type="number" step="any"></label>
 <label class="f"><span>Mediana (ímpar, 1–15)</span><input id="tpsMedianSamples" type="number" step="2" min="1" max="15"></label>
-<p class="hint">α menor = mais suave, porém mais lag. Mediana maior = mata mais spikes.</p>
+<label class="f"><span>Sinal invertido</span><input id="tpsInvert" type="checkbox"></label>
+<p class="hint">α menor = mais suave, porém mais lag. Mediana maior = mata mais spikes.
+Sinal invertido: p/ TPS com tensão maior fechado — espelha a leitura (4095−raw);
+recalibrar após mudar.</p>
 </fieldset>
 <fieldset><legend>Calibração</legend>
 <label class="f"><span>Estabilização (ms)</span><input id="calSettleMs" type="number" step="1"></label>
@@ -138,11 +146,18 @@ sinal real.</p>
 <label class="f"><span>Timeout por fase (ms)</span><input id="calTimeoutMs" type="number" step="1"></label>
 <label class="f"><span>Faixa mínima (counts)</span><input id="calMinRangeCounts" type="number" step="1"></label>
 <label class="f"><span>Duty da calibração (%)</span><input id="calDrivePct" type="number" step="any"></label>
+<label class="f"><span>Medir fase de fechamento</span><input id="calMeasureClose" type="checkbox"></label>
+<p class="hint">Desmarcado (corpo 8L): mín = repouso — recolher o pino abriria o
+switch de idle e abortaria. Marque só se o atuador tiver curso abaixo do repouso.</p>
 </fieldset>
 <fieldset><legend>Saída analógica</legend>
 <label class="f"><span>Mín (raw, 0 = auto)</span><input id="outMinRaw" type="number" step="1"></label>
 <label class="f"><span>Máx (raw, 0 = auto)</span><input id="outMaxRaw" type="number" step="1"></label>
 <label class="f"><span>Aprender máx fora de idle</span><input id="outAutoLearnMax" type="checkbox"></label>
+<label class="f"><span>Zero na soltura do idle</span><input id="outBaseOnRelease" type="checkbox"></label>
+<p class="hint">Ligado: 0% = posição da borboleta quando o pedal assume (a posição
+do atuador não vaza pro sinal); 100% fixo no máx. Desligado: régua fixa (mín da
+calibração).</p>
 </fieldset>
 <fieldset><legend>Switch de idle</legend>
 <label class="f"><span>Ativo em nível baixo</span><input id="idleActiveLow" type="checkbox"></label>
@@ -207,9 +222,9 @@ atuador até os fins de curso.</p>
 var el=function(id){return document.getElementById(id);};
 var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
-var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','calDrivePct','tpsEmaAlpha','isMinDutyPct'];
+var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','spSlewPctPerS','calDrivePct','tpsEmaAlpha','isMinDutyPct'];
 var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
-var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','idleActiveLow','isenseEnabled'];
+var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','calMeasureClose'];
 var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}
@@ -241,7 +256,7 @@ function render(s){
   t('sPid','P '+s.pidP.toFixed(1)+' · I '+s.pidI.toFixed(1)+' · D '+s.pidD.toFixed(1));
   t('sCal',s.cal.state+(s.cal.valid?'':' (inválida)'));
   el('sCal').className='v'+(s.cal.valid?'':' err');
-  t('sCalV','rep '+s.cal.rest+' · mín '+s.cal.min+' · máx '+s.cal.max+' · apr '+s.cal.learnedMax);
+  t('sCalV','rep '+s.cal.rest+' · mín '+s.cal.min+' · máx '+s.cal.max+' · apr '+s.cal.learnedMax+(s.cal.fail?' · FALHA: '+s.cal.fail:''));
   t('sVer','v'+s.ver);
   t('sUptime',up(s.uptimeMs));
   // Escala −100..+100 com o repouso (0) no centro da barra

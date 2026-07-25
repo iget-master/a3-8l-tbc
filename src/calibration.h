@@ -2,7 +2,9 @@
 #include <Arduino.h>
 
 // Auto calibração do sensor de posição: encontra repouso (motor solto),
-// abertura máxima (drive +calDrivePct) e mínima (drive -calDrivePct).
+// abertura máxima (drive +calDrivePct) e mínima (drive -calDrivePct). O mínimo
+// pode empatar com o repouso — corpos cujo repouso é o batente fechado não têm
+// faixa abaixo do repouso; a validação exige faixa real só na abertura.
 // Máquina de estados não-bloqueante: comanda hbridge e lê tps diretamente.
 // Persistência na NVS (namespace "cal"). Se o idle for solto durante uma fase
 // ativa, aborta e mantém a última calibração válida.
@@ -33,6 +35,7 @@ void run(bool idleActive);  // avança a máquina; chamar a cada loop() enquanto
 bool running();
 State state();
 const char* stateName();
+const char* failReason();  // motivo da última falha, com valores ("" se nenhuma)
 const Data& data();
 
 // Normalização com sinal pela calibração: −100% = minRaw, 0% = restRaw

@@ -65,7 +65,12 @@ void poll() {
   s_ema += alpha * ((float)medianN(s_ring, n) - s_ema);
 }
 
-uint16_t raw() { return (uint16_t)(s_ema + 0.5f); }
+uint16_t raw() {
+  const uint16_t v = (uint16_t)(s_ema + 0.5f);
+  // Pista invertida (tensão maior fechado): espelha aqui, na fonte — todo o
+  // resto do firmware enxerga raw crescendo ao abrir.
+  return settings::get().tpsInvert ? (uint16_t)(4095 - v) : v;
+}
 
 bool plausible() {
   const Settings& cfg = settings::get();

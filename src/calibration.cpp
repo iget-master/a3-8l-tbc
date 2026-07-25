@@ -1,5 +1,7 @@
 #include "calibration.h"
 
+#include <stdarg.h>
+
 #include <Preferences.h>
 
 #include "hbridge.h"
@@ -23,6 +25,17 @@ constexpr uint32_t kPersistMinIntervalMs = 60000;  // ...e com folga entre grava
 
 State s_state = State::Inactive;
 Data g_data;
+
+// Motivo da última falha (mostrado na página e no serial): tira a adivinhação
+// do diagnóstico em bancada.
+char s_failReason[112] = "";
+
+void setFail(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(s_failReason, sizeof(s_failReason), fmt, ap);
+  va_end(ap);
+}
 
 uint32_t s_phaseStartMs = 0;
 
@@ -76,9 +89,11 @@ void enterPhase(State st, uint32_t now) {
   resetStability();
 }
 
-// Checagem estrutural (mín < repouso < máx): protege positionPct de lixo na NVS.
+// Checagem estrutural (mín <= repouso < máx): protege positionPct de lixo na
+// NVS. O mín pode empatar com o repouso — corpos cujo repouso da mola é o
+// próprio batente fechado não têm faixa abaixo do repouso.
 bool structurallyValid(const Data& d) {
-  return d.minRaw < d.restRaw && d.restRaw < d.maxRaw;
+  return d.minRaw <= d.restRaw && d.restRaw < d.maxRaw;
 }
 
 void loadDataFromNvs() {
@@ -108,24 +123,35 @@ void persistData() {
 }
 
 void finishPhase(const Settings& cfg) {
-  if (s_candMin < s_candRest && s_candRest < s_candMax &&
-      (uint16_t)(s_candMax - s_candMin) >= cfg.calMinRangeCounts) {
-    g_data.restRaw = s_candRest;
-    g_data.minRaw = s_candMin;
-    g_data.maxRaw = s_candMax;
-    g_data.valid = true;
-    // Reconcilia o máx aprendido com a nova calibração: nunca abaixo do máx
-    // calibrado; acima da faixa plausível = fallback/lixo antigo → re-baseia.
-    if (s_learnedMax < g_data.maxRaw || s_learnedMax > cfg.tpsFaultHighRaw) {
-      s_learnedMax = g_data.maxRaw;
-    }
-    persistData();
-    s_persistedLearned = s_learnedMax;
-    s_lastPersistMs = millis();
-    s_state = State::Done;
-  } else {
+  // Corpo cujo repouso é o batente fechado: a fase "fechar" não sai do lugar e
+  // o mín empata com o repouso (diferença de ruído) — clampa e aceita. A faixa
+  // mínima é exigida só do lado da abertura, que é o lado que o controle usa.
+  // Motor com fios trocados continua reprovando: a fase "abrir" fecharia, o
+  // máx empataria com o repouso e a faixa de abertura não fecha a conta.
+  if (s_candMin > s_candRest) s_candMin = s_candRest;
+  if (!(s_candRest < s_candMax &&
+        (uint16_t)(s_candMax - s_candRest) >= cfg.calMinRangeCounts)) {
+    setFail("faixa de abertura insuficiente: rep %u, máx %u (Δ %d < %u)",
+            (unsigned)s_candRest, (unsigned)s_candMax,
+            (int)s_candMax - (int)s_candRest, (unsigned)cfg.calMinRangeCounts);
     abortRun();
+    return;
   }
+  g_data.restRaw = s_candRest;
+  g_data.minRaw = s_candMin;
+  g_data.maxRaw = s_candMax;
+  g_data.valid = true;
+  // Reconcilia o máx aprendido com a nova calibração: nunca abaixo do máx
+  // calibrado; acima da faixa plausível = fallback/lixo antigo → re-baseia.
+  if (s_learnedMax < g_data.maxRaw || s_learnedMax > cfg.tpsFaultHighRaw) {
+    s_learnedMax = g_data.maxRaw;
+  }
+  persistData();
+  s_persistedLearned = s_learnedMax;
+  s_lastPersistMs = millis();
+  s_state = State::Done;
+  Serial.printf("[cal] OK: rep %u · mín %u · máx %u\n", (unsigned)g_data.restRaw,
+                (unsigned)g_data.minRaw, (unsigned)g_data.maxRaw);
 }
 
 }  // namespace
@@ -155,6 +181,8 @@ bool start() {
   if (running()) return false;
   hbridge::disable();  // coast: mola leva ao repouso durante o assentamento
   s_candRest = s_candMin = s_candMax = 0;
+  s_failReason[0] = '\0';
+  Serial.printf("[cal] início (raw=%u)\n", (unsigned)tps::raw());
   enterPhase(State::SettleStart, millis());
   return true;
 }
@@ -163,12 +191,20 @@ void abortRun() {
   if (!running()) return;
   hbridge::disable();  // estado seguro: duty 0 + EN baixo
   loadDataFromNvs();   // volta à última calibração válida
+  // Abortos internos preenchem o motivo antes; aqui só o caso externo.
+  if (s_failReason[0] == '\0') {
+    strlcpy(s_failReason, "abortada de fora (TPS implausível ou troca de modo)",
+            sizeof(s_failReason));
+  }
+  Serial.printf("[cal] FALHA: %s\n", s_failReason);
   s_state = State::Failed;
 }
 
 void run(bool idleActive) {
   if (!running()) return;
   if (!idleActive) {  // pedal acionado no meio da rotina → aborta
+    setFail("idle solto durante a rotina (switch abriu na fase %s)",
+            stateName());
     abortRun();
     return;
   }
@@ -194,19 +230,36 @@ void run(bool idleActive) {
         const uint16_t avg = stabilityAverage();
         if (s_state == State::Rest) {
           s_candRest = avg;
+          Serial.printf("[cal] repouso=%u → abrindo\n", (unsigned)avg);
           hbridge::enable();
           hbridge::drive(cfg.calDrivePct);
           enterPhase(State::OpenMax, now);
         } else if (s_state == State::OpenMax) {
           s_candMax = avg;
-          hbridge::drive(-cfg.calDrivePct);
-          enterPhase(State::CloseMin, now);
+          if (cfg.calMeasureClose) {
+            Serial.printf("[cal] máx=%u → fechando\n", (unsigned)avg);
+            hbridge::drive(-cfg.calDrivePct);
+            enterPhase(State::CloseMin, now);
+          } else {
+            // Corpo sem curso abaixo do repouso (8L): recolher o pino
+            // descolaria a alavanca e abriria o switch de idle — pula a fase.
+            s_candMin = s_candRest;
+            Serial.printf("[cal] máx=%u → sem fase de fechamento (mín=rep)\n",
+                          (unsigned)avg);
+            hbridge::disable();  // motor solto: mola leva ao repouso
+            enterPhase(State::Finish, now);
+          }
         } else {
           s_candMin = avg;
+          Serial.printf("[cal] mín=%u → validando\n", (unsigned)avg);
           hbridge::disable();  // motor solto: borboleta volta ao repouso
           enterPhase(State::Finish, now);
         }
       } else if (now - s_phaseStartMs > cfg.calTimeoutMs) {
+        setFail("timeout na fase %s: TPS não estabilizou (banda %u counts por "
+                "%u ms; raw=%u)",
+                stateName(), (unsigned)cfg.calStabilityCounts,
+                (unsigned)cfg.calSettleMs, (unsigned)tps::raw());
         abortRun();
       }
       break;
@@ -239,6 +292,8 @@ const char* stateName() {
   }
   return "?";
 }
+
+const char* failReason() { return s_failReason; }
 
 const Data& data() { return g_data; }
 

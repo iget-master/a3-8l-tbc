@@ -89,6 +89,11 @@ void sanitize(Settings& s) {
     s.isOpenRaw = def.isOpenRaw;
     s.isStallRaw = def.isStallRaw;
   }
+
+  if (s.tpsInvert > 1) s.tpsInvert = 1;
+  if (s.calMeasureClose > 1) s.calMeasureClose = 1;
+  s.spSlewPctPerS = clampf(s.spSlewPctPerS, 0.0f, 20000.0f, def.spSlewPctPerS);
+  if (s.outBaseOnRelease > 1) s.outBaseOnRelease = 1;
 }
 
 }  // namespace
