@@ -43,8 +43,8 @@ montado à mão).
 | `settings` | Parâmetros ajustáveis persistidos na NVS |
 | `tps` | Leitura filtrada do potenciômetro de posição (ADC1) — pistas 1 e 2 (verificação cruzada opcional) |
 | `pwm_input` | Medição do duty do sinal PWM de comando (ISR) |
-| `hbridge` | Ponte H via LEDC — duty com sinal (abre/fecha/coast) |
-| `isense` | Corrente da ponte (IS do IBT-2) — fim de curso e falha de motor |
+| `motor` | Acionamento do motor via LEDC — um sentido (abrir; duty 0 = coast, mola fecha) |
+| `isense` | Corrente do motor (shunt futuro — dormente) — fim de curso e falha de motor |
 | `pid` | PID com anti-windup e derivada na medição |
 | `calibration` | Auto calibração (repouso/máx/mín) + NVS + máx aprendido do TPS |
 | `analog_out` | DAC (GPIO25) 0–100% → 0–3,3 V |
@@ -54,7 +54,7 @@ montado à mão).
 
 ## Regras de segurança (invariantes)
 
-- Estado seguro = ponte H **desabilitada** (mola leva a borboleta ao repouso). Todo caminho de falha deve terminar aí.
+- Estado seguro = saída do motor **desligada** (mola leva a borboleta ao repouso). Todo caminho de falha deve terminar aí.
 - **Nunca** acionar o motor com o pedal acionado (idle switch solto) — exceto modo manual de bancada, que expira sem keepalive.
 - ADC2 não pode ser usado (WiFi ativo): entradas analógicas só em ADC1 (GPIO32–39).
 

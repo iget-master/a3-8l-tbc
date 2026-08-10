@@ -4,7 +4,7 @@
 
 #include "analog_out.h"
 #include "calibration.h"
-#include "hbridge.h"
+#include "motor.h"
 #include "isense.h"
 #include "pid.h"
 #include "pins.h"
@@ -119,16 +119,16 @@ bool tpsRecovered(uint32_t now) {
 
 void setFault(const char* reason) {
   if (calibration::running()) calibration::abortRun();
-  hbridge::disable();
+  motor::disable();
   s_pid.reset();
   s_faultReason = reason;
   s_mode = Mode::Fault;
 }
 
 // Sai para o modo normal reavaliando idle e falhas (motor sempre solto aqui;
-// o Run re-habilita a ponte no próprio ciclo).
+// o Run re-habilita a saída no próprio ciclo).
 void enterNormal(uint32_t now) {
-  hbridge::disable();
+  motor::disable();
   s_pid.reset();
   s_spEffective = s_positionPct;  // engate suave: rampa parte de onde está
   if (tpsBadPersistent(now)) {
@@ -209,11 +209,12 @@ void runCycle(uint32_t now, float dt) {
     setFault(tps::plausible() ? kFaultTpsDiverge : kFaultTps);
   }
 
-  // Corrente da ponte: curto/desconexão derrubam qualquer modo que acione o
+  // Corrente do motor (quando houver sensor — shunt futuro; hoje isenseEnabled
+  // fica desligado): curto/desconexão derrubam qualquer modo que acione o
   // motor — inclusive Manual e Calibrating (setFault já aborta a calibração).
   // A falha fica retida (sem auto-recuperação): chicote se inspeciona, não se
   // "tenta de novo".
-  isense::evaluate(now, hbridge::appliedDuty());
+  isense::evaluate(now, motor::appliedDuty());
   if (s_mode != Mode::Boot && s_mode != Mode::Fault) {
     if (isense::shortCircuit()) {
       s_motorFaultLatched = true;
@@ -255,7 +256,7 @@ void runCycle(uint32_t now, float dt) {
 
     case Mode::Run: {
       if (!idle) {  // pedal acionado: motor solto, PID zerado
-        hbridge::disable();
+        motor::disable();
         s_pid.reset();
         s_mode = Mode::DriverActive;
         break;
@@ -263,19 +264,21 @@ void runCycle(uint32_t now, float dt) {
       if (!cmdPresent) {
         // Failsafe: sem comando (nem PWM nem override de bancada) → motor solto,
         // a mola leva a borboleta ao repouso (não fechar ativamente até o mínimo).
-        hbridge::disable();
+        motor::disable();
         s_pid.reset();
         break;
       }
       if (fabsf(s_setpointPct) <= cfg.deadbandPct) {
         // Pedido de repouso: zero absoluto = nenhuma corrente no motor.
         // Quem posiciona é a mola, não o PID.
-        hbridge::drive(0.0f);
+        motor::drive(0.0f);
         s_pid.reset();
         break;
       }
       s_pid.setGains(cfg.kp, cfg.ki, cfg.kd);
-      s_pid.setOutputLimit(cfg.maxDutyPct);
+      // Um sentido só: piso em 0 — "fechar" é coast (mola), e o integrador
+      // não acumula esforço negativo que o hardware não executa.
+      s_pid.setOutputRange(0.0f, cfg.maxDutyPct);
       const float err = s_setpointPct - s_positionPct;
       // Zona morta SUAVE (subtrativa): dentro dela o erro efetivo é zero;
       // fora, conta só o excedente — contínuo na borda. A versão dura (erro
@@ -285,8 +288,8 @@ void runCycle(uint32_t now, float dt) {
       if (err > cfg.deadbandPct) errEff = err - cfg.deadbandPct;
       else if (err < -cfg.deadbandPct) errEff = err + cfg.deadbandPct;
       const float out = s_pid.update(s_positionPct + errEff, s_positionPct, dt);
-      hbridge::enable();
-      hbridge::drive(out);
+      motor::enable();
+      motor::drive(out);
       break;
     }
 
@@ -305,7 +308,7 @@ void runCycle(uint32_t now, float dt) {
       break;
 
     case Mode::Fault:
-      hbridge::disable();  // garante estado seguro a cada ciclo
+      motor::disable();  // garante estado seguro a cada ciclo
       if (s_motorFaultLatched) break;  // retida: só sai por clearMotorFault()
       if (tpsBadPersistent(now)) {
         s_faultReason = tps::plausible() ? kFaultTpsDiverge : kFaultTps;
@@ -320,14 +323,14 @@ void runCycle(uint32_t now, float dt) {
         enterNormal(now);
         break;
       }
-      hbridge::enable();
-      hbridge::drive(constrain(s_manualDuty, -cfg.maxDutyPct, cfg.maxDutyPct));
+      motor::enable();
+      motor::drive(constrain(s_manualDuty, 0.0f, cfg.maxDutyPct));
       break;
   }
 
   // Auto-rastreio do repouso: só com a borboleta garantida no batente — Run,
   // idle ativo, ponte em coast — e assentada há >= 1 s (a mola já parou).
-  if (s_mode == Mode::Run && idle && hbridge::appliedDuty() == 0.0f) {
+  if (s_mode == Mode::Run && idle && motor::appliedDuty() == 0.0f) {
     if (s_restCoastSinceMs == 0) s_restCoastSinceMs = now;
     else if (now - s_restCoastSinceMs >= 1000) calibration::trackRest();
   } else {
@@ -422,7 +425,7 @@ const char* faultReason() {
 float setpointPct() { return s_setpointPct; }
 float positionPct() { return s_positionPct; }
 float pos2Pct() { return s_pos2Pct; }
-float appliedDutyPct() { return hbridge::appliedDuty(); }
+float appliedDutyPct() { return motor::appliedDuty(); }
 float analogOutPct() { return s_analogOutPct; }
 bool idleActive() { return s_idleStable; }
 float pidP() { return s_pid.pTerm(); }
@@ -432,7 +435,7 @@ float pidD() { return s_pid.dTerm(); }
 void requestCalibration() {
   if (!s_idleStable || s_mode == Mode::Calibrating) return;
   if (!calibration::start()) return;
-  hbridge::disable();  // a calibração assume o motor a partir daqui
+  motor::disable();  // a calibração assume o motor a partir daqui
   s_pid.reset();
   s_mode = Mode::Calibrating;
 }
@@ -444,12 +447,12 @@ void setManual(bool on, float dutyPct) {
   }
   if (s_mode == Mode::Calibrating) return;  // bancada não interrompe calibração
   const float lim = settings::get().maxDutyPct;
-  s_manualDuty = isnan(dutyPct) ? 0.0f : constrain(dutyPct, -lim, lim);
+  s_manualDuty = isnan(dutyPct) ? 0.0f : constrain(dutyPct, 0.0f, lim);
   s_manualKickMs = millis();  // rearma o keepalive
   if (s_mode != Mode::Manual) s_pid.reset();
   s_mode = Mode::Manual;
-  hbridge::enable();
-  hbridge::drive(s_manualDuty);
+  motor::enable();
+  motor::drive(s_manualDuty);
 }
 
 bool manualActive() { return s_mode == Mode::Manual; }

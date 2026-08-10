@@ -74,7 +74,7 @@ button.danger{background:var(--err);color:#fff}
 <div class="stat"><div class="l">TPS 2 (raw / pos)</div><div class="v" id="sRaw2">–</div></div>
 <div class="stat"><div class="l">Comando PWM</div><div class="v" id="sCmd">–</div></div>
 <div class="stat"><div class="l">Manual</div><div class="v" id="sManual">–</div></div>
-<div class="stat"><div class="l">Corrente ponte (raw)</div><div class="v" id="sCur">–</div></div>
+<div class="stat"><div class="l">Corrente motor (raw)</div><div class="v" id="sCur">–</div></div>
 <div class="stat"><div class="l">Fim de curso</div><div class="v" id="sStall">–</div></div>
 <div class="stat wide"><div class="l">Termos PID</div><div class="v" id="sPid">–</div></div>
 <div class="stat"><div class="l">Calibração</div><div class="v" id="sCal">–</div></div>
@@ -87,8 +87,8 @@ button.danger{background:var(--err);color:#fff}
 <div class="card">
 <h2>Modo manual (bancada)</h2>
 <p class="warnbox">⚠ Uso exclusivo em bancada, com o veículo desligado. O duty vai
-direto à ponte H, sem PID e sem a trava do pedal. Sem keepalive (aba fechada ou
-travada) o firmware desliga o motor em 3 s.</p>
+direto ao acionamento do motor, sem PID e sem a trava do pedal. Sem keepalive
+(aba fechada ou travada) o firmware desliga o motor em 3 s.</p>
 <label class="chk"><input type="checkbox" id="manOn"> ligar modo manual</label>
 <div class="manrow">
 <input type="range" id="manDuty" min="0" max="100" step="1" value="0" disabled>
@@ -152,13 +152,11 @@ habilitar/mudar inversão.</p>
 <label class="f"><span>Timeout por fase (ms)</span><input id="calTimeoutMs" type="number" step="1"></label>
 <label class="f"><span>Faixa mínima (counts)</span><input id="calMinRangeCounts" type="number" step="1"></label>
 <label class="f"><span>Duty da calibração (%)</span><input id="calDrivePct" type="number" step="any"></label>
-<label class="f"><span>Medir fase de fechamento</span><input id="calMeasureClose" type="checkbox"></label>
 <label class="f"><span>Auto-cal a cada N boots (0=nunca)</span><input id="calEveryBoots" type="number" step="1" min="0" max="1000"></label>
 <label class="f"><span>Auto-rastreio do repouso</span><input id="restTrackEnabled" type="checkbox"></label>
-<p class="hint">Desmarcado (corpo 8L): mín = repouso — recolher o pino abriria o
-switch de idle e abortaria. Marque só se o atuador tiver curso abaixo do repouso.
-Auto-cal periódica: calibra no boot a cada N boots (sempre que não houver
-calibração válida, calibra independente). Auto-rastreio: em idle+coast, EMA
+<p class="hint">Rotina: repouso → abertura máx (mín = repouso; fechar é da mola —
+acionamento de um sentido). Auto-cal periódica: calibra no boot a cada N boots
+(sem calibração válida, calibra independente). Auto-rastreio: em idle+coast, EMA
 lenta (~25 s) corrige o repouso contra drift (±80 counts da âncora).</p>
 </fieldset>
 <fieldset><legend>Saída analógica</legend>
@@ -174,7 +172,7 @@ calibração).</p>
 <label class="f"><span>Ativo em nível baixo</span><input id="idleActiveLow" type="checkbox"></label>
 <label class="f"><span>Debounce (ms)</span><input id="idleDebounceMs" type="number" step="1"></label>
 </fieldset>
-<fieldset><legend>Corrente do motor (IS do IBT-2)</legend>
+<fieldset><legend>Corrente do motor (sensor opcional — shunt futuro)</legend>
 <label class="f"><span>Habilitar detecção</span><input id="isenseEnabled" type="checkbox"></label>
 <label class="f"><span>Duty mín p/ avaliar (%)</span><input id="isMinDutyPct" type="number" step="any"></label>
 <label class="f"><span>Fim de curso ≥ (raw@100%)</span><input id="isStallRaw" type="number" step="1"></label>
@@ -235,7 +233,7 @@ var t=function(id,v){el(id).textContent=v;};
 var MODES={Boot:'Inicializando',Calibrating:'Calibrando',Run:'Regulando (idle)',DriverActive:'Pedal acionado',Fault:'FALHA',Manual:'Manual'};
 var FLOATS=['kp','ki','kd','deadbandPct','maxDutyPct','spSlewPctPerS','calDrivePct','tpsEmaAlpha','isMinDutyPct','tps2DivergePct'];
 var INTS=['loopHz','cmdTimeoutMs','pwmFreqHz','tpsFaultLowRaw','tpsFaultHighRaw','tpsMedianSamples','calSettleMs','calStabilityCounts','calTimeoutMs','calMinRangeCounts','calEveryBoots','outMinRaw','outMaxRaw','idleDebounceMs','isShortRaw','isOpenRaw','isStallRaw','isShortMs','isOpenMs','isStallMs'];
-var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','tps2Enabled','tps2Invert','calMeasureClose','restTrackEnabled'];
+var BOOLS=['cmdStuckHighIs100','outAutoLearnMax','outBaseOnRelease','idleActiveLow','isenseEnabled','tpsInvert','tps2Enabled','tps2Invert','restTrackEnabled'];
 var TEXTS=['apSsid','apPass','staSsid','staPass'];
 
 function setOnline(on){var b=el('conn');b.textContent=on?'conectado':'sem conexão';b.className='badge'+(on?' on':'');}

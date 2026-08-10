@@ -4,7 +4,7 @@
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 
-#include "hbridge.h"
+#include "motor.h"
 #include "settings.h"
 
 namespace ota {
@@ -14,7 +14,7 @@ void begin() {
   // Mesma credencial do AP: uma senha só para rede e gravação.
   ArduinoOTA.setPassword(settings::get().apPass);
   ArduinoOTA.onStart([]() {
-    hbridge::disable();  // motor solto: a transferência bloqueia o loop()
+    motor::disable();  // motor solto: a transferência bloqueia o loop()
     Serial.println("[ota] espota: iniciando gravação");
   });
   ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {

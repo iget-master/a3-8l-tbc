@@ -4,7 +4,7 @@
 
 #include <Preferences.h>
 
-#include "hbridge.h"
+#include "motor.h"
 #include "settings.h"
 #include "tps.h"
 
@@ -269,7 +269,7 @@ void begin() {
 
 bool start() {
   if (running()) return false;
-  hbridge::disable();  // coast: mola leva ao repouso durante o assentamento
+  motor::disable();  // coast: mola leva ao repouso durante o assentamento
   s_candRest = s_candMin = s_candMax = 0;
   s_candRest2 = s_candMin2 = s_candMax2 = 0;
   s_failReason[0] = '\0';
@@ -280,7 +280,7 @@ bool start() {
 
 void abortRun() {
   if (!running()) return;
-  hbridge::disable();  // estado seguro: duty 0 + EN baixo
+  motor::disable();  // estado seguro: duty 0 + EN baixo
   loadDataFromNvs();   // volta à última calibração válida
   initTrackState();    // rastreio re-ancora na calibração restaurada
   // Abortos internos preenchem o motivo antes; aqui só o caso externo.
@@ -315,8 +315,8 @@ void run(bool idleActive) {
       // Reaplica o drive da fase a cada iteração: se algo zerar o LEDC no meio
       // (ex.: troca de pwmFreqHz pela web), o duty volta no próximo tick em vez
       // de a fase estabilizar numa posição errada.
-      if (s_state == State::OpenMax) hbridge::drive(cfg.calDrivePct);
-      else if (s_state == State::CloseMin) hbridge::drive(-cfg.calDrivePct);
+      if (s_state == State::OpenMax) motor::drive(cfg.calDrivePct);
+      else if (s_state == State::CloseMin) motor::drive(-cfg.calDrivePct);
       feedStability(tps::raw(), now, cfg.calStabilityCounts);
       if (stabilityReached(now, cfg.calSettleMs)) {
         const uint16_t avg = stabilityAverage();
@@ -324,31 +324,19 @@ void run(bool idleActive) {
           s_candRest = avg;
           s_candRest2 = tps::raw2();  // pista 2: snapshot com a borboleta parada
           Serial.printf("[cal] repouso=%u → abrindo\n", (unsigned)avg);
-          hbridge::enable();
-          hbridge::drive(cfg.calDrivePct);
+          motor::enable();
+          motor::drive(cfg.calDrivePct);
           enterPhase(State::OpenMax, now);
-        } else if (s_state == State::OpenMax) {
+        } else {
+          // Acionamento de um sentido só: não existe "fechar ativo" — o mín é
+          // o próprio repouso (a mola fecha). A antiga fase CloseMin também
+          // abriria o switch de idle neste corpo (pino descola da alavanca).
           s_candMax = avg;
           s_candMax2 = tps::raw2();
-          if (cfg.calMeasureClose) {
-            Serial.printf("[cal] máx=%u → fechando\n", (unsigned)avg);
-            hbridge::drive(-cfg.calDrivePct);
-            enterPhase(State::CloseMin, now);
-          } else {
-            // Corpo sem curso abaixo do repouso (8L): recolher o pino
-            // descolaria a alavanca e abriria o switch de idle — pula a fase.
-            s_candMin = s_candRest;
-            s_candMin2 = s_candRest2;
-            Serial.printf("[cal] máx=%u → sem fase de fechamento (mín=rep)\n",
-                          (unsigned)avg);
-            hbridge::disable();  // motor solto: mola leva ao repouso
-            enterPhase(State::Finish, now);
-          }
-        } else {
-          s_candMin = avg;
-          s_candMin2 = tps::raw2();
-          Serial.printf("[cal] mín=%u → validando\n", (unsigned)avg);
-          hbridge::disable();  // motor solto: borboleta volta ao repouso
+          s_candMin = s_candRest;
+          s_candMin2 = s_candRest2;
+          Serial.printf("[cal] máx=%u → validando (mín=rep)\n", (unsigned)avg);
+          motor::disable();  // motor solto: mola leva ao repouso
           enterPhase(State::Finish, now);
         }
       } else if (now - s_phaseStartMs > cfg.calTimeoutMs) {

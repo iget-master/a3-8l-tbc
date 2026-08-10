@@ -3,17 +3,17 @@
 Firmware para **ESP32 DevKit** que controla o atuador de marcha lenta integrado ao
 corpo de borboleta a cabo do Audi A3 8L 1.8T 20v 150cv.
 
-O atuador é um motor DC acoplado diretamente ao eixo da borboleta. Ele exerce
-torque contra a mola de retorno, podendo **abrir** ou **fechar** a borboleta em
-relação à posição de repouso (com o motor desligado, a mola leva a borboleta de
-volta ao repouso). O controle da abertura é feito modulando o motor por PWM
-através de uma ponte H, que permite girar o motor nos dois sentidos.
+O atuador é um motor DC que empurra a borboleta contra a mola de retorno —
+**só no sentido de abrir**; o fechar é sempre passivo, pela mola (com o motor
+desligado ela leva a borboleta de volta ao batente de repouso em ~0,3 s). O
+controle da abertura é feito modulando o motor por PWM num estágio de potência
+de **um sentido** (P-FET high-side — ver `docs/hardware.md`).
 
 ## Visão geral
 
 ```
                           ┌──────────────────────────────┐
-  Sinal PWM (alvo %) ────►│                              │────► Ponte H ──► Motor do atuador
+  Sinal PWM (alvo %) ────►│                              │────► PWM 1 sentido ──► Motor do atuador
   Switch de idle ────────►│           ESP32              │
   Potenciômetro TPS ─────►│  (PID + calibração + WiFi)   │────► Saída analógica (posição 0–100%)
                           │                              │
@@ -30,7 +30,7 @@ através de uma ponte H, que permite girar o motor nos dois sentidos.
 | PWM de comando | Entrada | Duty cycle 0–100% representa o percentual de abertura desejado do atuador |
 | Switch de idle | Entrada | Fechado quando o pedal do acelerador está **solto** (marcha lenta). Aberto quando o motorista acelera |
 | Potenciômetro (TPS) | Entrada analógica | Feedback da posição real da borboleta |
-| Ponte H (IN1/IN2) | Saída PWM | Aciona o motor do atuador nos dois sentidos (abrir / fechar) |
+| Acionamento do motor | Saída PWM | Um sentido (**abrir**); duty 0 = coast e a mola fecha |
 | Saída analógica | Saída (DAC) | Posição da borboleta 0–100%, **mascarada** pela lógica de idle (ver abaixo) |
 
 ## Semântica de posição: −100% a +100% (0 = repouso)
@@ -55,7 +55,7 @@ O duty do PWM de comando (0–100%) mapeia linearmente nessa escala:
 todo)**.
 
 Pedir repouso é pedir **zero absoluto**: com o setpoint dentro da zona morta em
-torno de 0, a ponte fica em coast (**nenhuma corrente no motor**) e quem
+torno de 0, a saída fica em coast (**nenhuma corrente no motor**) e quem
 posiciona a borboleta é a mola — o PID não tenta "segurar" o repouso, então não
 há atuação indesejada por erro fracionário de calibração.
 
@@ -74,16 +74,17 @@ há atuação indesejada por erro fracionário de calibração.
   mesma escala com sinal.
 - Setpoint dentro da zona morta em torno de 0 → **coast** (motor sem corrente,
   mola posiciona). Fora dela, um PID (derivada na medição, anti-windup por
-  integração condicional) calcula o esforço **com sinal**:
-  - Esforço positivo → PWM na ponte H no sentido **abrir**.
-  - Esforço negativo → PWM na ponte H no sentido **fechar** (abaixo do repouso).
-- Zona morta também se aplica ao erro (dentro dela o erro vale zero e o
-  integrador segura o último esforço); limite de duty configurável pela web.
+  integração condicional) calcula o esforço com **faixa assimétrica [0, duty
+  máx]**: esforço positivo → PWM no sentido **abrir**; "fechar" é soltar
+  (duty 0 → a mola desce a borboleta) — o piso em 0 impede o integrador de
+  acumular pedido de fechar que o hardware não executa.
+- Zona morta suave (subtrativa) também se aplica ao erro; limite de duty
+  configurável pela web.
 
 ### Regra do switch de idle
 
 **Se o motorista estiver acionando o acelerador (switch de idle aberto), o motor
-NÃO é acionado** — a ponte H fica desabilitada e o PID é reinicializado
+NÃO é acionado** — a saída fica desabilitada e o PID é reinicializado
 (integrador zerado) para não acumular erro enquanto o pedal comanda a borboleta
 pelo cabo.
 
@@ -126,11 +127,10 @@ idle acionado** (pedal solto); se a vez chegou e o idle não permite, o firmware
 segue com a calibração salva e tenta no próximo boot. Fases:
 
 1. **Repouso** — motor solto; aguarda a leitura estabilizar e registra.
-2. **Abertura máxima** — motor acionado (duty `calDrivePct`, default 100%) no
-   sentido abrir; aguarda estabilizar no fim de curso e registra.
-3. **Abertura mínima** — idem no sentido fechar (fase **pulada** com
-   `calMeasureClose` desligado — corpo 8L: mín = repouso); registra.
-4. Motor solto (borboleta volta ao repouso); valores validados
+2. **Abertura máxima** — motor acionado (duty `calDrivePct`, default 100%);
+   aguarda estabilizar no fim de curso e registra. O **mínimo = repouso**
+   (acionamento de um sentido: fechar é da mola, não há fase de fechamento).
+3. Motor solto (borboleta volta ao repouso); valores validados
    (mín ≤ repouso < máx, faixa mínima de abertura configurável) e salvos na
    NVS (pistas 1 e 2, quando habilitada).
 
@@ -158,7 +158,7 @@ calibrações completas (`calEveryBoots`). Persiste na NVS com throttling.
 | `Calibrating` | Auto calibração em andamento | pisca 5 Hz |
 | `Run` | Em idle: PID atuando no motor | pisca 1 Hz |
 | `DriverActive` | Pedal acionado: motor solto, PID zerado, aprende máx do TPS | 2 piscadas curtas/s |
-| `Fault` | TPS implausível ou sem calibração: ponte desabilitada | aceso fixo |
+| `Fault` | TPS implausível ou sem calibração: saída do motor desligada | aceso fixo |
 | `Manual` | Bancada (via web): duty direto, expira sem keepalive | pisca 10 Hz |
 
 ## Segurança / failsafe
@@ -175,14 +175,15 @@ calibrações completas (`calEveryBoots`). Persiste na NVS com throttling.
   **motor solto (coast)**: a mola leva a borboleta ao repouso. Sinal preso em
   nível alto pode, opcionalmente (`cmdStuckHighIs100`, default ligado), valer
   duty 100% (= setpoint +100).
-- **Corrente da ponte (IS do IBT-2, opcional — `isenseEnabled`)**: sob drive,
+- **Corrente do motor (sensor opcional — shunt futuro; `isenseEnabled`, hoje
+  desligado)**: sob drive,
   corrente sustentada acima do limiar de curto ou abaixo do de desconexão →
   `Fault` **retida** ("curto no motor" / "motor desconectado"; vale também nos
   modos Manual e Calibrating). Não há auto-recuperação: limpar pela web (botão
   "Limpar falha do motor") ou reiniciar. O mesmo sensor expõe **fim de curso**
   (stall) como telemetria na página.
 - **Watchdog de tarefa** no loop principal (task WDT, ~5 s): travamento do
-  firmware → reset, e o boot reinicializa com a ponte H desabilitada.
+  firmware → reset, e o boot reinicializa com a saída do motor desligada.
 - Modo manual expira em 3 s sem keepalive.
 - Parâmetros são saneados (faixas e relações entre campos) tanto na carga da
   NVS quanto ao salvar pela web.
@@ -201,7 +202,7 @@ a página em `http://192.168.4.1/`:
   aplicado, saída analógica, raw do TPS, duty/frequência do comando, termos
   P/I/D, estado e valores da calibração, versão/uptime.
 - **Parâmetros** (persistidos na NVS): ganhos Kp/Ki/Kd, zona morta, limite de
-  duty, frequência da malha e do PWM da ponte, timeout/semântica do sinal de
+  duty, frequência da malha e do PWM do motor, timeout/semântica do sinal de
   comando, faixa de plausibilidade, filtro (α da EMA e nº de amostras da
   mediana), sinal invertido e pista 2 (verificação cruzada) do TPS, parâmetros
   da calibração, mapeamento
@@ -217,7 +218,8 @@ API HTTP (form-encoded/JSON): `GET /api/status`, `GET|POST /api/params`,
 
 ## Hardware
 
-Sugestão de pinout, ponte H e circuitos de condicionamento estão documentados em
+Sugestão de pinout, estágio de acionamento do motor e circuitos de
+condicionamento estão documentados em
 [`docs/hardware.md`](docs/hardware.md).
 
 ## Build e gravação
@@ -243,8 +245,8 @@ Dois caminhos, ambos só com o core (ArduinoOTA/Update):
   `.pio/build/esp32dev/firmware.bin`. Funciona também no AP do veículo (ex.:
   pelo celular).
 
-Cuidados: atualizar **com o motor desligado** — ao iniciar a gravação a ponte H
-é desabilitada e o loop fica bloqueado até o fim da transferência; ao final o
+Cuidados: atualizar **com o motor desligado** — ao iniciar a gravação a saída
+do motor é desligada e o loop fica bloqueado até o fim da transferência; ao final o
 ESP32 reinicia (boot em estado seguro). Parâmetros e calibração ficam na NVS.
 
 > Gotcha: a gravação **USB** escreve sempre na partição `app0`, mas o OTA
@@ -268,7 +270,7 @@ ESP32 reinicia (boot em estado seguro). Parâmetros e calibração ficam na NVS.
     ├── settings.*       ← parâmetros ajustáveis persistidos na NVS
     ├── tps.*            ← leitura filtrada do potenciômetro (mediana + EMA)
     ├── pwm_input.*      ← medição do duty do comando (ISR)
-    ├── hbridge.*        ← ponte H via LEDC (duty com sinal)
+    ├── motor.*          ← acionamento do motor via LEDC (um sentido)
     ├── pid.*            ← PID com anti-windup e derivada na medição
     ├── calibration.*    ← auto calibração + NVS + máx aprendido do TPS
     ├── analog_out.*     ← saída DAC 0–100%
@@ -283,7 +285,7 @@ ESP32 reinicia (boot em estado seguro). Parâmetros e calibração ficam na NVS.
 - [x] Documentação do projeto e do hardware (pinout)
 - [x] Esqueleto do projeto PlatformIO
 - [x] Leitura do TPS + medição do PWM de entrada + idle switch
-- [x] Driver da ponte H (LEDC, dois sentidos)
+- [x] Acionamento do motor (LEDC; um sentido desde a 0.13.0)
 - [x] Rotina de auto calibração + persistência NVS
 - [x] Malha PID + regra do idle switch + failsafes
 - [x] Saída analógica mascarada (DAC)

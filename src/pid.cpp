@@ -2,21 +2,21 @@
 
 #include <math.h>
 
-namespace {
-
-float clampAbs(float v, float lim) {
-  return v > lim ? lim : (v < -lim ? -lim : v);
-}
-
-}  // namespace
-
 void Pid::setGains(float kp, float ki, float kd) {
   kp_ = kp;
   ki_ = ki;
   kd_ = kd;
 }
 
-void Pid::setOutputLimit(float maxAbs) { limit_ = fabsf(maxAbs); }
+void Pid::setOutputRange(float outMin, float outMax) {
+  outMin_ = outMin;
+  outMax_ = outMax;
+  if (outMin_ > outMax_) outMin_ = outMax_;
+}
+
+float Pid::clampOut(float v) const {
+  return v > outMax_ ? outMax_ : (v < outMin_ ? outMin_ : v);
+}
 
 void Pid::reset() {
   p_ = 0.0f;
@@ -29,7 +29,7 @@ void Pid::reset() {
 float Pid::update(float setpoint, float measurement, float dtSec) {
   if (dtSec <= 0.0f) {
     // dt inválido: repete a última saída sem tocar no estado
-    return clampAbs(p_ + i_ - d_, limit_);
+    return clampOut(p_ + i_ - d_);
   }
 
   const float e = setpoint - measurement;
@@ -44,11 +44,12 @@ float Pid::update(float setpoint, float measurement, float dtSec) {
   }
   lastMeas_ = measurement;
 
-  // Anti-windup: só integra se a saída não estiver saturada no sentido do erro.
+  // Anti-windup: só integra se a saída não estiver saturada no sentido do
+  // erro; o integrador vive dentro da própria faixa de saída.
   const float out = p_ + i_ - d_;
   const bool satSameDir =
-      (out >= limit_ && e > 0.0f) || (out <= -limit_ && e < 0.0f);
-  if (!satSameDir) i_ = clampAbs(i_ + ki_ * e * dtSec, limit_);
+      (out >= outMax_ && e > 0.0f) || (out <= outMin_ && e < 0.0f);
+  if (!satSameDir) i_ = clampOut(i_ + ki_ * e * dtSec);
 
-  return clampAbs(p_ + i_ - d_, limit_);
+  return clampOut(p_ + i_ - d_);
 }

@@ -3,7 +3,7 @@
 #include "analog_out.h"
 #include "calibration.h"
 #include "control.h"
-#include "hbridge.h"
+#include "motor.h"
 #include "isense.h"
 #include "ota.h"
 #include "pins.h"
@@ -47,7 +47,7 @@ void setup() {
   tps::begin();
   isense::begin();
   pwm_input::begin();
-  hbridge::begin();
+  motor::begin();
   analog_out::begin();
   calibration::begin();
   control::begin();

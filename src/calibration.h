@@ -1,11 +1,11 @@
 #pragma once
 #include <Arduino.h>
 
-// Auto calibração do sensor de posição: encontra repouso (motor solto),
-// abertura máxima (drive +calDrivePct) e mínima (drive -calDrivePct). O mínimo
-// pode empatar com o repouso — corpos cujo repouso é o batente fechado não têm
-// faixa abaixo do repouso; a validação exige faixa real só na abertura.
-// Máquina de estados não-bloqueante: comanda hbridge e lê tps diretamente.
+// Auto calibração do sensor de posição: encontra repouso (motor solto) e
+// abertura máxima (drive +calDrivePct). Com acionamento de um sentido só não
+// há "fechar ativo": o mínimo é o próprio repouso (mola no batente) e a
+// validação exige faixa real só na abertura.
+// Máquina de estados não-bloqueante: comanda o motor e lê tps diretamente.
 // Persistência na NVS (namespace "cal"). Se o idle for solto durante uma fase
 // ativa, aborta e mantém a última calibração válida.
 namespace calibration {

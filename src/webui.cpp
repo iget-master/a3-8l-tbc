@@ -6,7 +6,7 @@
 
 #include "calibration.h"
 #include "control.h"
-#include "hbridge.h"
+#include "motor.h"
 #include "isense.h"
 #include "pwm_input.h"
 #include "settings.h"
@@ -158,7 +158,7 @@ void handleParamsGet() {
       "\"tps2DivergePct\":%.1f,"
       "\"calSettleMs\":%u,\"calStabilityCounts\":%u,"
       "\"calTimeoutMs\":%lu,\"calMinRangeCounts\":%u,\"calDrivePct\":%.2f,"
-      "\"calMeasureClose\":%s,\"calEveryBoots\":%u,\"restTrackEnabled\":%s,"
+      "\"calEveryBoots\":%u,\"restTrackEnabled\":%s,"
       "\"outMinRaw\":%u,\"outMaxRaw\":%u,\"outAutoLearnMax\":%s,"
       "\"outBaseOnRelease\":%s,"
       "\"idleActiveLow\":%s,\"idleDebounceMs\":%u,"
@@ -177,7 +177,7 @@ void handleParamsGet() {
       (double)s.tps2DivergePct,
       (unsigned)s.calSettleMs, (unsigned)s.calStabilityCounts,
       (unsigned long)s.calTimeoutMs, (unsigned)s.calMinRangeCounts,
-      (double)s.calDrivePct, b(s.calMeasureClose != 0),
+      (double)s.calDrivePct,
       (unsigned)s.calEveryBoots, b(s.restTrackEnabled != 0),
       (unsigned)s.outMinRaw, (unsigned)s.outMaxRaw,
       b(s.outAutoLearnMax), b(s.outBaseOnRelease != 0),
@@ -219,7 +219,6 @@ void handleParamsPost() {
   s.calTimeoutMs = (uint32_t)argLong("calTimeoutMs", s.calTimeoutMs, 500, 60000);
   s.calMinRangeCounts = (uint16_t)argLong("calMinRangeCounts", s.calMinRangeCounts, 10, 4095);
   s.calDrivePct = argFloat("calDrivePct", s.calDrivePct, 10.0f, 100.0f);
-  s.calMeasureClose = argBool("calMeasureClose", s.calMeasureClose != 0) ? 1u : 0u;
   s.calEveryBoots = (uint32_t)argLong("calEveryBoots", (long)s.calEveryBoots, 0, 1000);
   s.restTrackEnabled = argBool("restTrackEnabled", s.restTrackEnabled != 0) ? 1u : 0u;
   s.outMinRaw = (uint16_t)argLong("outMinRaw", s.outMinRaw, 0, 4095);
@@ -269,14 +268,14 @@ void handleParamsPost() {
   }
 
   settings::save();
-  if (s.pwmFreqHz != oldFreq) hbridge::setFrequency(s.pwmFreqHz);
+  if (s.pwmFreqHz != oldFreq) motor::setFrequency(s.pwmFreqHz);
   sendOk();
 }
 
 void handleManual() {
   const bool on = s_server.arg("on").toInt() != 0;
   const float duty = on
-      ? clampv(s_server.arg("duty").toFloat(), -100.0f, 100.0f)
+      ? clampv(s_server.arg("duty").toFloat(), 0.0f, 100.0f)
       : 0.0f;
   control::setManual(on, duty);
   sendOk();
@@ -306,7 +305,7 @@ void handleFaultClear() {
 void handleUpdateUpload() {
   HTTPUpload& up = s_server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    hbridge::disable();
+    motor::disable();
     Serial.printf("[ota] web: recebendo \"%s\"\n", up.filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE) {
@@ -342,7 +341,7 @@ void handleDefaults() {
   settings::resetDefaults();
   settings::save();
   if (settings::get().pwmFreqHz != oldFreq) {
-    hbridge::setFrequency(settings::get().pwmFreqHz);
+    motor::setFrequency(settings::get().pwmFreqHz);
   }
   sendOk();
 }

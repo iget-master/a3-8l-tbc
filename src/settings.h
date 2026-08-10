@@ -79,10 +79,9 @@ struct Settings {
   // anexado começa em campo de 4 bytes.
   uint32_t tpsInvert = 0;
 
-  // Calibração: medir a fase de fechamento (drive −calDrivePct)? No corpo do
-  // 8L o repouso é o batente fechado E recolher o pino descola a alavanca,
-  // abrindo o switch de idle — a fase não mede nada e aborta a rotina. Padrão
-  // desligado: mín = repouso. uint32_t pela regra da migração (campo de 4 B).
+  // LEGADO (sem efeito desde o acionamento de um sentido só): a fase de
+  // fechamento deixou de existir. Campo mantido apenas pelo layout do blob na
+  // NVS (migração append-only não remove campos).
   uint32_t calMeasureClose = 0;
 
   // Rampa do setpoint (%/s; 0 = desligada): limita a variação do setpoint que

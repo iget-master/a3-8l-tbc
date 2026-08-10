@@ -1,11 +1,11 @@
 #pragma once
 #include <Arduino.h>
 
-// Sensor de corrente da ponte H (R_IS+L_IS do IBT-2/BTS7960 → PIN_ISENSE,
-// ADC1). O IS espelha a corrente do motor (I_IS = I_motor/8500) e, em falha do
-// driver (curto/sobrecorrente), injeta ~4,5 mA fixos — assinatura que satura o
-// ADC. Como o IS só conduz com o high-side ligado, a média lida escala com o
-// duty; evaluate() normaliza para 100% de duty antes de comparar limiares.
+// Sensor de corrente do motor (PIN_ISENSE, ADC1) — DORMENTE no hardware atual
+// (acionamento de um sentido sem sensoriamento; isenseEnabled desligado).
+// Preparado para um shunt low-side + amplificador (ex.: 20 mΩ + INA180A1) no
+// retorno de GND do motor. A média lida escala com o duty do PWM; evaluate()
+// normaliza para 100% de duty antes de comparar limiares.
 //
 // Condições (sustentadas pelos tempos configurados; avaliadas apenas com
 // |duty| >= isMinDutyPct e isenseEnabled):
