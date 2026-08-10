@@ -5,6 +5,35 @@ versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+## [0.13.0] - 2026-08-10
+
+### Alterado
+
+- **Acionamento do motor de UM sentido só** (adeus IBT-2/ponte H): módulo
+  `hbridge` substituído por `motor` — um canal LEDC no GPIO18 (abrir; duty 0 =
+  coast, a mola fecha em ~0,3 s, medido). GPIO19/21 liberados. Estágio de
+  potência novo: **P-FET high-side** discreto (AOD409 + push-pull S8050/S8550 +
+  SS54 + clamp zener), com estado seguro por construção (gate = source em
+  boot/reset/brownout) e fail-safe de chicote (roçado ao chassi → fusível
+  abre) — ver `docs/hardware.md`.
+- **PID com faixa de saída assimétrica [0, duty máx]**: o piso em 0 impede o
+  integrador de acumular pedido de fechar que o hardware não executa (windup
+  negativo atrasaria o reengate).
+- Calibração sem fase de fechamento (mín = repouso, sempre); parâmetro
+  `calMeasureClose` virou legado (some da página/API; campo mantido só pelo
+  layout da NVS).
+- Modo manual e API `/api/manual` agora só aceitam duty 0..100.
+- **Sem sensor de corrente por enquanto**: módulo `isense` mantido dormente
+  (`isenseEnabled` desligado) com GPIO33 reservado para shunt futuro
+  (20 mΩ + INA180A1).
+- `docs/hardware.md` documenta a **placa própria como construída** (esquemático
+  A3-TBC-FULL validado): estágio P-FET real (2N7002 + push-pull + AOD4185),
+  alimentação XL1509-5.0 + AMS1117 com TVS SMBJ18A (nota do jump-start),
+  fusível externo como requisito de instalação, USB onboard (CP2102N +
+  auto-reset + ESD), proteções de todas as interfaces e pinout do conector
+  CN1. Também: etiqueta VP do GPIO36, resistor de 100 Ω no TPS+, divisor do
+  PWM de comando em 5 V e proteção da saída analógica.
+
 ## [0.12.0] - 2026-07-26
 
 ### Adicionado
